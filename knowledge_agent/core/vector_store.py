@@ -66,17 +66,46 @@ class VectorStore:
         api_key = os.getenv("HUGGINGFACE_API_KEY")
         endpoint_url = os.getenv("HUGGINGFACE_ENDPOINT_URL")
 
-        # Determine device based on availability
+        # Determine device and check CUDA compatibility
         import torch
-        if torch.cuda.is_available():
-            device = os.getenv("EMBEDDING_DEVICE", "cuda")
-            cuda_version = torch.version.cuda
-            logger.info(f"CUDA is available (version {cuda_version}). Using device: {device}")
-        else:
-            device = os.getenv("EMBEDDING_DEVICE", "cpu")
-            logger.info(f"CUDA is not available. Using device: {device}")
+        import subprocess
+        import re
+
+        def get_cuda_version():
+            try:
+                nvidia_smi = subprocess.check_output(['nvidia-smi']).decode('utf-8')
+                cuda_version = re.search(r'CUDA Version: (\d+\.\d+)', nvidia_smi)
+                if cuda_version:
+                    return cuda_version.group(1)
+            except:
+                return None
+            return None
+
+        def check_torch_cuda_compatibility():
+            cuda_version = get_cuda_version()
+            if cuda_version is None:
+                logger.warning("CUDA not found on system")
+                return False
+
+            if not hasattr(torch.version, 'cuda') or not torch.version.cuda:
+                logger.error(f"PyTorch not compiled with CUDA support. System CUDA version: {cuda_version}")
+                logger.error("Please install PyTorch with CUDA support:")
+                major_version = cuda_version.split('.')[0]
+                logger.error(f"pip install torch --index-url https://download.pytorch.org/whl/cu{major_version}{''.join(cuda_version.split('.')[:2])}")
+                return False
+
+            logger.info(f"System CUDA version: {cuda_version}, PyTorch CUDA version: {torch.version.cuda}")
+            return True
+
+        # Check CUDA compatibility
+        cuda_compatible = check_torch_cuda_compatibility()
+        device = os.getenv("EMBEDDING_DEVICE", "cuda" if cuda_compatible else "cpu")
         
-        logger.debug(f"Initializing embeddings with type: {embedding_type}")
+        if device.startswith("cuda") and not cuda_compatible:
+            logger.warning("CUDA requested but not available, falling back to CPU")
+            device = "cpu"
+        
+        logger.debug(f"Initializing embeddings with type: {embedding_type} on device: {device}")
         
         try:
             if embedding_type == "hosted":

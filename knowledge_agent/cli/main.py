@@ -320,7 +320,7 @@ def fetch(repo: tuple, from_file: str, branch: str = 'master', ingest: bool = Fa
             logger.info(f"Updating repository {repo_name} (branch: {repository_branch})")
             
             # Fetch/clone the repository
-            repo_path = repo_manager.get_repository(repository_url, repository_branch)
+            repo_path = repo_manager.fetch_repo(repository_url, repository_branch)
             
             if ingest:
                 logger.info("Ingesting code files...")
