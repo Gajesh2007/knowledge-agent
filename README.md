@@ -159,4 +159,172 @@ knowledge-agent fetch --clean  # Remove all cached repos
 ```
 
 2. **Ask questions (one-off)**:
+```bash
+# Use default role (engineer)
+knowledge-agent search "How does the vector store work?"
+
+# Specify a role
+knowledge-agent search --role beginner "How does the vector store work?"
+knowledge-agent search -r bd "What's the business impact of the vector store?"
 ```
+
+3. **Start an interactive session**:
+```bash
+# Start with default role
+knowledge-agent session
+
+# Start with specific role
+knowledge-agent session --role beginner
+```
+
+### Interactive Session Commands
+
+- Ask questions directly by typing them
+- `role <role>`: Switch to a different role (beginner/engineer/bd)
+- `clear`: Clear conversation history
+- `exit` or Ctrl+D: End the session
+
+### Working with GitHub Repositories
+
+The knowledge agent can directly fetch and analyze code from GitHub repositories:
+
+1. **Fetch and Ingest in One Step**:
+```bash
+# Single repository
+knowledge-agent fetch --repo https://github.com/user/repo1 --ingest
+
+# Multiple repositories
+knowledge-agent fetch -r repo1 -r repo2 -r repo3 --ingest
+
+# Specific branch
+knowledge-agent fetch --repo https://github.com/user/repo1 -b develop --ingest
+```
+
+2. **Fetch First, Ingest Later**:
+```bash
+# Fetch repositories
+knowledge-agent fetch --repo https://github.com/user/repo1
+knowledge-agent fetch -r repo2 -b main
+
+# Ingest when ready
+knowledge-agent ingest --path ./.repos/repo1
+knowledge-agent ingest --path ./.repos/repo2
+```
+
+3. **Repository Management**:
+```bash
+# Clean specific repository
+knowledge-agent fetch --repo https://github.com/user/repo1 --clean
+
+# Clean all cached repositories
+knowledge-agent fetch --clean
+
+# Update existing repositories
+knowledge-agent fetch --repo https://github.com/user/repo1 --update
+```
+
+4. **Version Control Integration**:
+```bash
+# List available versions
+knowledge-agent version list ./.repos/repo1
+
+# Compare versions
+knowledge-agent version diff ./.repos/repo1 -o v1.0.0 -n v2.0.0
+
+# Ingest specific version
+knowledge-agent version ingest ./.repos/repo1 -r v1.0.0
+```
+
+## Development
+
+1. **Setup Development Environment**:
+```bash
+# Clone the repository
+git clone https://github.com/Gajesh2007/knowledge-agent.git
+cd knowledge-agent
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install development dependencies
+poetry install --with dev
+```
+
+2. **Run Tests**:
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_retrieval.py
+
+# Run tests by marker
+pytest -m "not slow"  # Skip slow tests
+pytest -m integration  # Run only integration tests
+
+# Run tests with coverage
+pytest --cov=knowledge_agent
+```
+
+3. **Code Quality**:
+```bash
+# Format code
+black knowledge_agent tests
+
+# Sort imports
+isort knowledge_agent tests
+
+# Lint code
+flake8 knowledge_agent tests
+```
+
+4. **Documentation**:
+```bash
+# Generate documentation
+knowledge-agent docs generate ./knowledge_agent -o ./docs
+
+# Serve documentation locally
+cd docs && mkdocs serve
+```
+
+## Project Structure
+
+```
+knowledge-agent/
+├── knowledge_agent/          # Main package
+│   ├── core/                # Core functionality
+│   │   ├── retrieval.py     # Advanced retrieval
+│   │   ├── documentation.py # Documentation generation
+│   │   └── ...
+│   └── cli/                 # CLI interface
+├── tests/                   # Test suite
+├── docs/                    # Documentation
+└── pyproject.toml          # Project configuration
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests (`pytest`)
+5. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Create a Pull Request
+
+### Commit Message Guidelines
+
+We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+- `feat:` New features
+- `fix:` Bug fixes
+- `docs:` Documentation changes
+- `test:` Adding or modifying tests
+- `refactor:` Code changes that neither fix bugs nor add features
+- `style:` Changes that don't affect code meaning (formatting, etc)
+- `chore:` Changes to build process or auxiliary tools
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
