@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "knowledge-agent"
+version = "0.1.0"
+description = "A CLI-based knowledge base agent for code and documentation using LangChain and Claude"
+authors = ["Gajesh Naik"]
+readme = "README.md"
+packages = [{include = "knowledge_agent"}]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.12"
+langchain = "0.3.17"
+langchain-community = "0.3.16"
+langchain-core = "0.3.33"
+langchain-text-splitters = "0.3.5"
+langchain-huggingface = "0.1.2"
+langchain-chroma = "0.2.1"
+anthropic = "0.45.2"
+chromadb = "0.6.3"
+click = "8.1.8"
+python-dotenv = "1.0.1"
+sentence-transformers = "3.4.1"
+rich = "13.9.4"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.3.4"
+black = "25.1.0"
+isort = "6.0.0"
+flake8 = "7.1.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+knowledge-agent = "knowledge_agent.cli.main:cli"
