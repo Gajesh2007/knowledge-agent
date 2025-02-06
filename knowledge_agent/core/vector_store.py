@@ -89,12 +89,26 @@ class VectorStore:
 
             if not hasattr(torch.version, 'cuda') or not torch.version.cuda:
                 logger.error(f"PyTorch not compiled with CUDA support. System CUDA version: {cuda_version}")
-                logger.error("Please install PyTorch with CUDA support:")
+                logger.error("Please install PyTorch with CUDA support using one of these commands:")
                 major_version = cuda_version.split('.')[0]
-                logger.error(f"pip install torch --index-url https://download.pytorch.org/whl/cu{major_version}{''.join(cuda_version.split('.')[:2])}")
+                minor_version = cuda_version.split('.')[1]
+                cuda_version_str = f"{major_version}{minor_version}"
+                logger.error(f"For system Python: pip install torch --index-url https://download.pytorch.org/whl/cu{cuda_version_str}")
+                logger.error(f"For Poetry environment: poetry run pip install torch --index-url https://download.pytorch.org/whl/cu{cuda_version_str}")
+                logger.error(f"Current environment: {'Poetry' if 'POETRY_ACTIVE' in os.environ else 'System Python'}")
+                return False
+
+            # Check if CUDA is actually working
+            if not torch.cuda.is_available():
+                logger.error("PyTorch CUDA support is installed but CUDA is not available")
+                logger.error("This might be due to:")
+                logger.error("1. NVIDIA drivers not properly installed")
+                logger.error("2. CUDA toolkit not properly installed")
+                logger.error("3. Incompatible CUDA versions between PyTorch and system")
                 return False
 
             logger.info(f"System CUDA version: {cuda_version}, PyTorch CUDA version: {torch.version.cuda}")
+            logger.info(f"Available CUDA devices: {torch.cuda.device_count()}")
             return True
 
         # Check CUDA compatibility
