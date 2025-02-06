@@ -8,6 +8,7 @@ packages = [{include = "knowledge_agent"}]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
+torch = ">=2.0.0"
 langchain = "0.3.17"
 langchain-community = "0.3.16"
 langchain-core = "0.3.33"

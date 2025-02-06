@@ -65,7 +65,16 @@ class VectorStore:
         model_name = os.getenv("EMBEDDING_MODEL", "Alibaba-NLP/gte-Qwen2-7B-instruct")
         api_key = os.getenv("HUGGINGFACE_API_KEY")
         endpoint_url = os.getenv("HUGGINGFACE_ENDPOINT_URL")
-        device = os.getenv("EMBEDDING_DEVICE", "mps" if os.path.exists("/dev/mps0") else "cpu")
+
+        # Determine device based on availability
+        import torch
+        if torch.cuda.is_available():
+            device = os.getenv("EMBEDDING_DEVICE", "cuda")
+            cuda_version = torch.version.cuda
+            logger.info(f"CUDA is available (version {cuda_version}). Using device: {device}")
+        else:
+            device = os.getenv("EMBEDDING_DEVICE", "cpu")
+            logger.info(f"CUDA is not available. Using device: {device}")
         
         logger.debug(f"Initializing embeddings with type: {embedding_type}")
         
