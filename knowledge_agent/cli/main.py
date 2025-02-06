@@ -275,21 +275,28 @@ def cli():
 
 @cli.command()
 @click.option('--repo', multiple=True, help='GitHub repository URLs to fetch (can specify multiple)')
-@click.option('--from-file', type=click.Path(exists=True, dir_okay=False), help='Text file containing repository URLs (one per line)')
-@click.option('--branch', default='master', help='Branch to fetch (applies to all repos)')
+@click.option('--from-file', type=click.Path(exists=True, dir_okay=False), help='Text file containing "repository_url branch" pairs (one per line)')
+@click.option('--branch', default='master', help='Default branch to fetch (used when not specified per repository)')
 @click.option('--ingest', is_flag=True, help='Ingest the repositories after fetching')
 @click.option('--exclude', multiple=True, help='Patterns to exclude from ingestion')
 def fetch(repo: tuple, from_file: str, branch: str = 'master', ingest: bool = False, exclude: tuple = ()):
     """Fetch and optionally ingest GitHub repositories."""
-    repositories = list(repo)  # Convert tuple to list
+    repositories = [(r, branch) for r in repo]  # Convert tuple to list with default branch
     
     # Read additional repos from file if provided
     if from_file:
         try:
             with open(from_file, 'r') as f:
-                # Read non-empty lines and strip whitespace
-                file_repos = [line.strip() for line in f if line.strip()]
-                repositories.extend(file_repos)
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):  # Skip empty lines and comments
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        repo_url, repo_branch = parts[0], parts[1]
+                    else:
+                        repo_url, repo_branch = parts[0], branch  # Use default branch if not specified
+                    repositories.append((repo_url, repo_branch))
         except Exception as e:
             console.print(f"[error]Failed to read repositories from file: {str(e)}[/error]")
             return
@@ -302,18 +309,18 @@ def fetch(repo: tuple, from_file: str, branch: str = 'master', ingest: bool = Fa
     
     # Show summary of what will be processed
     console.print(f"\n[info]Will process {len(repositories)} repositories:[/info]")
-    for repo_url in repositories:
-        console.print(f"  • {repo_url}")
+    for repo_url, repo_branch in repositories:
+        console.print(f"  • {repo_url} (branch: {repo_branch})")
     console.print()
     
-    for repository_url in repositories:
+    for repository_url, repository_branch in repositories:
         try:
             # Extract repo name from URL
             repo_name = repository_url.split('/')[-1].replace('.git', '')
-            logger.info(f"Updating repository {repo_name}")
+            logger.info(f"Updating repository {repo_name} (branch: {repository_branch})")
             
             # Fetch/clone the repository
-            repo_path = repo_manager.get_repository(repository_url, branch)
+            repo_path = repo_manager.get_repository(repository_url, repository_branch)
             
             if ingest:
                 logger.info("Ingesting code files...")
