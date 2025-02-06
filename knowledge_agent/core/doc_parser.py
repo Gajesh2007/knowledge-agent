@@ -5,7 +5,7 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
 
@@ -13,17 +13,28 @@ import PyPDF2
 import toml
 import yaml
 import latex2mathml.converter
+from markdown_it import MarkdownIt
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class DocSection:
-    """Represents a section of documentation."""
-    title: str
+    """A section of a document with metadata."""
     content: str
-    source_file: Path
-    line_number: Optional[int] = None
-    metadata: Dict[str, str] = None
+    title: str = 'Untitled Section'
+    source_file: Optional[Path] = None
+    line_number: int = 0
+    content_type: str = 'text'
+    metadata: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        """Ensure metadata is a dictionary."""
+        if self.metadata is None:
+            self.metadata = {}
+        if not isinstance(self.metadata, dict):
+            self.metadata = {'value': str(self.metadata)}
+        if self.source_file is not None and not isinstance(self.source_file, Path):
+            self.source_file = Path(str(self.source_file))
 
 class DocParser(ABC):
     """Abstract base class for document parsers."""
@@ -41,65 +52,96 @@ class DocParser(ABC):
 class MarkdownParser(DocParser):
     """Parser for Markdown documents."""
     
+    def __init__(self):
+        """Initialize the Markdown parser."""
+        self.md = MarkdownIt()
+    
     def parse_file(self, file_path: Path) -> List[DocSection]:
-        """Parse a Markdown file."""
+        """Parse a Markdown file into sections."""
         sections = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
                 
-                # Split into sections based on headers
-                current_section = ""
-                current_title = "Main"
-                line_number = 1
-                
-                for line in content.split('\n'):
-                    # Check for headers (both # and === or --- style)
-                    if line.startswith('#'):
-                        # Save previous section if it exists
-                        if current_section:
+            # Parse the markdown content
+            tokens = self.md.parse(content)
+            current_section = []
+            current_title = None
+            current_line = 0
+            
+            for token in tokens:
+                if token.type == 'heading_open':
+                    # If we have a previous section, add it
+                    if current_section:
+                        section_content = '\n'.join(current_section)
+                        if section_content.strip():
                             sections.append(DocSection(
-                                title=current_title,
-                                content=current_section.strip(),
+                                content=section_content,
+                                title=current_title or 'Untitled Section',
                                 source_file=file_path,
-                                line_number=line_number,
-                                metadata=self.extract_metadata(current_section)
+                                line_number=current_line,
+                                content_type='markdown',
+                                metadata={'type': 'heading', 'level': token.tag[1]}
                             ))
-                        
-                        # Start new section
-                        current_title = line.lstrip('#').strip()
-                        current_section = ""
-                    elif line.startswith('===') and current_section:
-                        # Previous line was a header
-                        title_line = current_section.strip().split('\n')[-1]
-                        current_section = '\n'.join(current_section.strip().split('\n')[:-1])
-                        
-                        if current_section:
+                        current_section = []
+                    current_line = token.map[0] + 1 if token.map else 0
+                elif token.type == 'heading_close':
+                    current_title = '\n'.join(current_section)
+                    current_section = []
+                elif token.type == 'inline':
+                    current_section.append(token.content)
+                elif token.type == 'paragraph_open':
+                    if current_section:
+                        section_content = '\n'.join(current_section)
+                        if section_content.strip():
                             sections.append(DocSection(
-                                title=current_title,
-                                content=current_section.strip(),
+                                content=section_content,
+                                title=current_title or 'Untitled Section',
                                 source_file=file_path,
-                                line_number=line_number,
-                                metadata=self.extract_metadata(current_section)
+                                line_number=current_line,
+                                content_type='markdown',
+                                metadata={'type': 'paragraph'}
                             ))
-                        
-                        current_title = title_line
-                        current_section = ""
-                    else:
-                        current_section += line + "\n"
-                    line_number += 1
-                
-                # Add the last section
-                if current_section:
+                        current_section = []
+                    current_line = token.map[0] + 1 if token.map else 0
+            
+            # Add the last section
+            if current_section:
+                section_content = '\n'.join(current_section)
+                if section_content.strip():
                     sections.append(DocSection(
-                        title=current_title,
-                        content=current_section.strip(),
+                        content=section_content,
+                        title=current_title or 'Untitled Section',
                         source_file=file_path,
-                        line_number=line_number,
-                        metadata=self.extract_metadata(current_section)
+                        line_number=current_line,
+                        content_type='markdown',
+                        metadata={'type': 'paragraph'}
                     ))
+            
+            # If no sections were created, create one for the entire content
+            if not sections and content.strip():
+                sections.append(DocSection(
+                    content=content,
+                    title='Document',
+                    source_file=file_path,
+                    line_number=1,
+                    content_type='markdown',
+                    metadata={'type': 'document'}
+                ))
+                
         except Exception as e:
-            logger.error(f"Failed to parse Markdown {file_path}: {str(e)}")
+            logger.error(f"Failed to parse markdown file {file_path}: {str(e)}")
+            # Return the entire content as a single section if it's not empty
+            if content.strip():
+                sections = [DocSection(
+                    content=content,
+                    title='Document',
+                    source_file=file_path,
+                    line_number=1,
+                    content_type='markdown',
+                    metadata={'type': 'document'}
+                )]
+        
         return sections
     
     def extract_metadata(self, content: str) -> Dict[str, str]:
@@ -123,44 +165,32 @@ class TextParser(DocParser):
     """Parser for plain text documents."""
     
     def parse_file(self, file_path: Path) -> List[DocSection]:
-        """Parse a text file."""
+        """Parse a text file into sections."""
         sections = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
                 
-                # Split into sections based on blank lines
-                current_section = []
-                line_number = 1
-                section_number = 1
-                
-                for line in content.split('\n'):
-                    if line.strip():
-                        current_section.append(line)
-                    elif current_section:
-                        # End of section
-                        sections.append(DocSection(
-                            title=f"Section {section_number}",
-                            content='\n'.join(current_section),
-                            source_file=file_path,
-                            line_number=line_number - len(current_section),
-                            metadata=self.extract_metadata('\n'.join(current_section))
-                        ))
-                        current_section = []
-                        section_number += 1
-                    line_number += 1
-                
-                # Add the last section
-                if current_section:
-                    sections.append(DocSection(
-                        title=f"Section {section_number}",
-                        content='\n'.join(current_section),
-                        source_file=file_path,
-                        line_number=line_number - len(current_section),
-                        metadata=self.extract_metadata('\n'.join(current_section))
-                    ))
+            # Split content into paragraphs
+            paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+            for i, paragraph in enumerate(paragraphs):
+                sections.append(DocSection(
+                    content=paragraph,
+                    source_file=file_path,
+                    line_number=sum(len(p.split('\n')) for p in paragraphs[:i]) + i + 1,
+                    content_type='text',
+                    metadata={'type': 'paragraph', 'index': i}
+                ))
         except Exception as e:
             logger.error(f"Failed to parse text file {file_path}: {str(e)}")
+            # Return the entire content as a single section
+            sections = [DocSection(
+                content=content,
+                source_file=file_path,
+                content_type='text',
+                metadata={'type': 'document'}
+            )]
+        
         return sections
     
     def extract_metadata(self, content: str) -> Dict[str, str]:
@@ -210,10 +240,11 @@ class ReStructuredTextParser(DocParser):
                         # Save previous section if it exists
                         if current_section:
                             sections.append(DocSection(
-                                title=current_title,
                                 content=current_section.strip(),
+                                title=current_title,
                                 source_file=file_path,
                                 line_number=line_number,
+                                content_type='rst',
                                 metadata=metadata
                             ))
                         
@@ -228,10 +259,11 @@ class ReStructuredTextParser(DocParser):
                 # Add the last section
                 if current_section:
                     sections.append(DocSection(
-                        title=current_title,
                         content=current_section.strip(),
+                        title=current_title,
                         source_file=file_path,
                         line_number=line_number,
+                        content_type='rst',
                         metadata=metadata
                     ))
         except Exception as e:
@@ -272,10 +304,11 @@ class PdfParser(DocParser):
                     text = page.extract_text()
                     if text.strip():
                         sections.append(DocSection(
-                            title=f"Page {i+1}",
                             content=text,
+                            title=f"Page {i+1}",
                             source_file=file_path,
                             line_number=None,  # PDFs don't have line numbers
+                            content_type='pdf',
                             metadata=self.extract_metadata(text)
                         ))
         except Exception as e:
@@ -311,10 +344,11 @@ class LatexParser(DocParser):
                     preamble = content[:doc_start].strip()
                     if preamble:
                         sections.append(DocSection(
-                            title="Preamble",
                             content=self._convert_latex(preamble),
+                            title="Preamble",
                             source_file=file_path,
                             line_number=1,
+                            content_type='tex',
                             metadata=metadata
                         ))
                     content = content[doc_start:]
@@ -326,10 +360,11 @@ class LatexParser(DocParser):
                         # Save previous section if it exists
                         if current_section:
                             sections.append(DocSection(
-                                title=current_title,
                                 content=self._convert_latex(current_section.strip()),
+                                title=current_title,
                                 source_file=file_path,
                                 line_number=line_number,
+                                content_type='tex',
                                 metadata=metadata
                             ))
                         
@@ -343,10 +378,11 @@ class LatexParser(DocParser):
                 # Add the last section
                 if current_section:
                     sections.append(DocSection(
-                        title=current_title,
                         content=self._convert_latex(current_section.strip()),
+                        title=current_title,
                         source_file=file_path,
                         line_number=line_number,
+                        content_type='tex',
                         metadata=metadata
                     ))
         except Exception as e:
@@ -404,7 +440,7 @@ class YamlParser(DocParser):
     """Parser for YAML documents."""
     
     def parse_file(self, file_path: Path) -> List[DocSection]:
-        """Parse a YAML file."""
+        """Parse a YAML file into sections."""
         sections = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -412,39 +448,40 @@ class YamlParser(DocParser):
                 data = yaml.safe_load(content)
                 
                 # Convert YAML data to sections
-                sections.extend(self._process_yaml_data(data, file_path))
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        sections.append(DocSection(
+                            content=str(value),
+                            title=str(key),
+                            source_file=file_path,
+                            content_type='yaml',
+                            metadata={'type': 'key_value', 'key': key}
+                        ))
+                elif isinstance(data, list):
+                    for i, item in enumerate(data):
+                        sections.append(DocSection(
+                            content=str(item),
+                            title=f"Item {i+1}",
+                            source_file=file_path,
+                            content_type='yaml',
+                            metadata={'type': 'list_item', 'index': i}
+                        ))
+                else:
+                    sections.append(DocSection(
+                        content=str(data),
+                        source_file=file_path,
+                        content_type='yaml',
+                        metadata={'type': 'document'}
+                    ))
         except Exception as e:
-            logger.error(f"Failed to parse YAML {file_path}: {str(e)}")
-        return sections
-    
-    def _process_yaml_data(self, data: Union[Dict, List], file_path: Path, parent_key: str = "") -> List[DocSection]:
-        """Process YAML data recursively."""
-        sections = []
-        
-        if isinstance(data, dict):
-            for key, value in data.items():
-                section_title = f"{parent_key}.{key}" if parent_key else key
-                if isinstance(value, (dict, list)):
-                    sections.extend(self._process_yaml_data(value, file_path, section_title))
-                else:
-                    sections.append(DocSection(
-                        title=section_title,
-                        content=str(value),
-                        source_file=file_path,
-                        metadata=self.extract_metadata(str(value))
-                    ))
-        elif isinstance(data, list):
-            for i, item in enumerate(data):
-                section_title = f"{parent_key}[{i}]" if parent_key else f"item_{i}"
-                if isinstance(item, (dict, list)):
-                    sections.extend(self._process_yaml_data(item, file_path, section_title))
-                else:
-                    sections.append(DocSection(
-                        title=section_title,
-                        content=str(item),
-                        source_file=file_path,
-                        metadata=self.extract_metadata(str(item))
-                    ))
+            logger.error(f"Failed to parse YAML file {file_path}: {str(e)}")
+            # Return the entire content as a single section
+            sections = [DocSection(
+                content=content,
+                source_file=file_path,
+                content_type='yaml',
+                metadata={'type': 'document'}
+            )]
         
         return sections
     
@@ -481,9 +518,10 @@ class JsonParser(DocParser):
                     sections.extend(self._process_json_data(value, file_path, section_title))
                 else:
                     sections.append(DocSection(
-                        title=section_title,
                         content=str(value),
+                        title=section_title,
                         source_file=file_path,
+                        content_type='json',
                         metadata=self.extract_metadata(str(value))
                     ))
         elif isinstance(data, list):
@@ -493,9 +531,10 @@ class JsonParser(DocParser):
                     sections.extend(self._process_json_data(item, file_path, section_title))
                 else:
                     sections.append(DocSection(
-                        title=section_title,
                         content=str(item),
+                        title=section_title,
                         source_file=file_path,
+                        content_type='json',
                         metadata=self.extract_metadata(str(item))
                     ))
         
@@ -533,9 +572,10 @@ class TomlParser(DocParser):
                 sections.extend(self._process_toml_data(value, file_path, section_title))
             else:
                 sections.append(DocSection(
-                    title=section_title,
                     content=str(value),
+                    title=section_title,
                     source_file=file_path,
+                    content_type='toml',
                     metadata=self.extract_metadata(str(value))
                 ))
         
@@ -551,6 +591,7 @@ class ParserFactory:
     
     _parsers = {
         '.md': MarkdownParser,
+        '.markdown': MarkdownParser,
         '.txt': TextParser,
         '.rst': ReStructuredTextParser,
         '.pdf': PdfParser,

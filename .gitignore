@@ -56,3 +56,5 @@ _templates/
 # OS
 .DS_Store
 Thumbs.db
+
+.repos/

@@ -275,10 +275,10 @@ def cli():
 
 @cli.command()
 @click.option('--repo', help='GitHub repository URL to fetch')
-@click.option('--branch', default='main', help='Branch to fetch')
+@click.option('--branch', default='master', help='Branch to fetch')
 @click.option('--ingest', is_flag=True, help='Ingest the repository after fetching')
 @click.option('--exclude', multiple=True, help='Patterns to exclude from ingestion')
-def fetch(repo: str, branch: str = 'main', ingest: bool = False, exclude: tuple = ()):
+def fetch(repo: str, branch: str = 'master', ingest: bool = False, exclude: tuple = ()):
     """Fetch a GitHub repository and optionally ingest it."""
     try:
         # Create .repos directory if it doesn't exist
@@ -301,8 +301,10 @@ def fetch(repo: str, branch: str = 'main', ingest: bool = False, exclude: tuple 
             git.Repo.clone_from(repo, repo_path, branch=branch)
         
         if ingest:
-            # Initialize vector store
-            vector_store = VectorStore()
+            # Initialize vector store with persist directory
+            vector_store = VectorStore(
+                persist_directory=os.getenv("VECTOR_STORE_PATH", "./.vectorstore")
+            )
             
             # Ingest code files
             logger.info("Ingesting code files...")

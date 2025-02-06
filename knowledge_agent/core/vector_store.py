@@ -43,6 +43,19 @@ class VectorStore:
         # Initialize advanced retrieval
         self.advanced_retrieval = None
     
+    def add_chunk(self, chunk: Document) -> None:
+        """Add a single document chunk to the vector store."""
+        if not chunk:
+            logger.warning("Empty chunk provided")
+            return
+        
+        try:
+            self.db.add_documents([chunk])
+            logger.debug(f"Added chunk to vector store: {chunk.page_content[:100]}...")
+        except Exception as e:
+            logger.error("Error adding chunk to vector store", exc_info=e)
+            raise
+    
     def add_documents(self, documents: List[Document]) -> None:
         """Add documents to the vector store."""
         if not documents:
