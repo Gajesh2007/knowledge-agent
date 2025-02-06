@@ -21,7 +21,7 @@ A powerful command-line tool that helps you understand your codebase through nat
 
 ### Advanced Retrieval & Context
 
-The knowledge agent now includes advanced retrieval capabilities that enhance search results through:
+The knowledge agent includes advanced retrieval capabilities that enhance search results through:
 
 - **Semantic Clustering**: Results are automatically grouped into semantic clusters for better organization
 - **Context-Aware Scoring**: Search results are scored based on conversation context and relevance
@@ -62,7 +62,7 @@ Each search result includes:
 
 ### Documentation Generation
 
-The knowledge agent now includes powerful documentation generation capabilities:
+The knowledge agent includes powerful documentation generation capabilities:
 
 - **Automated Documentation**: Generate comprehensive documentation from your codebase
   - Multiple templates (module, API)
@@ -110,7 +110,7 @@ knowledge-agent docs diagram ./src -o architecture.png
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/knowledge-agent.git
+git clone https://github.com/Gajesh2007/knowledge-agent.git
 cd knowledge-agent
 ```
 
@@ -120,15 +120,23 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies:
+3. Install dependencies using Poetry:
 ```bash
-pip install -r requirements.txt
+# Install Poetry if you haven't already
+curl -sSL https://install.python-poetry.org | python3 -
+
+# Install project dependencies
+poetry install
 ```
 
 4. Copy the example environment file and configure your settings:
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env with your settings:
+# - ANTHROPIC_API_KEY: Your Claude API key
+# - VECTOR_STORE_PATH: Path to store the vector database (default: ./.vectorstore)
+# - DEFAULT_ROLE: Default role for responses (default: engineer)
+# - LOG_LEVEL: Logging verbosity (default: INFO)
 ```
 
 ## Usage
@@ -164,35 +172,96 @@ knowledge-agent session --role beginner
 - `clear`: Clear conversation history
 - `exit` or Ctrl+D: End the session
 
-## Configuration
-
-The following environment variables can be configured in `.env`:
-
-- `ANTHROPIC_API_KEY`: Your Claude API key
-- `VECTOR_STORE_PATH`: Path to store the vector database
-- `DEFAULT_ROLE`: Default role for responses (beginner/engineer/bd)
-- `LOG_LEVEL`: Logging verbosity (INFO/DEBUG/WARNING)
-
 ## Development
 
-1. Install development dependencies:
+1. **Setup Development Environment**:
 ```bash
-pip install -r requirements-dev.txt
+# Clone the repository
+git clone https://github.com/yourusername/knowledge-agent.git
+cd knowledge-agent
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install development dependencies
+poetry install --with dev
 ```
 
-2. Run tests:
+2. **Run Tests**:
 ```bash
+# Run all tests
 pytest
+
+# Run specific test file
+pytest tests/test_retrieval.py
+
+# Run tests by marker
+pytest -m "not slow"  # Skip slow tests
+pytest -m integration  # Run only integration tests
+
+# Run tests with coverage
+pytest --cov=knowledge_agent
+```
+
+3. **Code Quality**:
+```bash
+# Format code
+black knowledge_agent tests
+
+# Sort imports
+isort knowledge_agent tests
+
+# Lint code
+flake8 knowledge_agent tests
+```
+
+4. **Documentation**:
+```bash
+# Generate documentation
+knowledge-agent docs generate ./knowledge_agent -o ./docs
+
+# Serve documentation locally
+cd docs && mkdocs serve
+```
+
+## Project Structure
+
+```
+knowledge-agent/
+├── knowledge_agent/          # Main package
+│   ├── core/                # Core functionality
+│   │   ├── retrieval.py     # Advanced retrieval
+│   │   ├── documentation.py # Documentation generation
+│   │   └── ...
+│   └── cli/                 # CLI interface
+├── tests/                   # Test suite
+├── docs/                    # Documentation
+└── pyproject.toml          # Project configuration
 ```
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests (`pytest`)
+5. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Create a Pull Request
+
+### Commit Message Guidelines
+
+We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+- `feat:` New features
+- `fix:` Bug fixes
+- `docs:` Documentation changes
+- `test:` Adding or modifying tests
+- `refactor:` Code changes that neither fix bugs nor add features
+- `style:` Changes that don't affect code meaning (formatting, etc)
+- `chore:` Changes to build process or auxiliary tools
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
