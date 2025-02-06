@@ -166,39 +166,144 @@ def _ingest_code_entities(entities: List[CodeEntity], vector_store: VectorStore)
                 logger.warning(f"Entity {entity.name} has non‐dict metadata, forcing to dict.")
                 entity.metadata = {'_forced': str(entity.metadata)}
 
-            # Build and filter metadata
+            # Build rich metadata with all available context
             code_meta = _filter_metadata({
                 'type': 'code',
                 'entity_type': entity.type,
+                'semantic_type': entity.semantic_type,
                 'name': entity.name,
+                'full_qualified_name': entity.full_qualified_name,
                 'language': entity.metadata.get('language', 'unknown'),
                 'file_path': entity.metadata.get('path', ''),
                 'start_line': entity.start_line,
                 'end_line': entity.end_line,
                 'parent': entity.parent or '',
                 'dependencies': ','.join(sorted(entity.dependencies)) if entity.dependencies else '',
+                'related_entities': ','.join(sorted(entity.related_entities)) if entity.related_entities else '',
+                'symbols': ','.join(sorted(entity.symbols)) if entity.symbols else '',
+                'api_endpoints': ','.join(sorted(entity.api_endpoints)) if entity.api_endpoints else '',
+                'related_files': ','.join(sorted(entity.related_files)) if entity.related_files else '',
+                'package': entity.metadata.get('package', ''),
+                'module': entity.metadata.get('module', ''),
             })
-            # Make a Document for the code
-            doc_code = Document(page_content=entity.code, metadata=code_meta)
+
+            # Create rich search text combining all available information
+            search_text = entity.to_search_text()
+            
+            # Make a Document for the code with rich search text
+            doc_code = Document(page_content=search_text, metadata=code_meta)
             vector_store.add_chunk(doc_code)
             chunks_created += 1
 
-            # If docstring exists, store it separately
+            # If docstring exists, store it with context
             if entity.docstring:
                 docstring_meta = _filter_metadata({
                     'type': 'docstring',
                     'entity_name': entity.name,
                     'entity_type': entity.type,
+                    'semantic_type': entity.semantic_type,
                     'language': entity.metadata.get('language', 'unknown'),
                     'file_path': entity.metadata.get('path', ''),
                     'start_line': entity.start_line,
+                    'full_qualified_name': entity.full_qualified_name,
+                    'package': entity.metadata.get('package', ''),
+                    'module': entity.metadata.get('module', ''),
                 })
-                doc_docstring = Document(page_content=entity.docstring, metadata=docstring_meta)
+                
+                # Combine docstring with related context
+                docstring_text = [entity.docstring]
+                if entity.module_doc:
+                    docstring_text.append(f"Module Documentation:\n{entity.module_doc}")
+                if entity.semantic_summary:
+                    docstring_text.append(f"Summary:\n{entity.semantic_summary}")
+                
+                doc_docstring = Document(
+                    page_content="\n\n".join(docstring_text),
+                    metadata=docstring_meta
+                )
                 vector_store.add_chunk(doc_docstring)
+                chunks_created += 1
+
+            # Store relationships as separate chunks for better relationship queries
+            if any(rels for rels in entity.relationships.values()):
+                relationship_meta = _filter_metadata({
+                    'type': 'relationships',
+                    'entity_name': entity.name,
+                    'entity_type': entity.type,
+                    'semantic_type': entity.semantic_type,
+                    'language': entity.metadata.get('language', 'unknown'),
+                    'file_path': entity.metadata.get('path', ''),
+                    'full_qualified_name': entity.full_qualified_name,
+                })
+                
+                # Build relationship text
+                relationship_text = []
+                for rel_type, entities in entity.relationships.items():
+                    if entities:
+                        relationship_text.append(
+                            f"{rel_type.replace('_', ' ').title()}:\n" +
+                            "\n".join(f"- {e}" for e in sorted(entities))
+                        )
+                
+                if relationship_text:
+                    doc_relationships = Document(
+                        page_content="\n\n".join(relationship_text),
+                        metadata=relationship_meta
+                    )
+                    vector_store.add_chunk(doc_relationships)
+                    chunks_created += 1
+
+            # Store usage examples if available
+            if entity.usage_examples:
+                examples_meta = _filter_metadata({
+                    'type': 'examples',
+                    'entity_name': entity.name,
+                    'entity_type': entity.type,
+                    'semantic_type': entity.semantic_type,
+                    'language': entity.metadata.get('language', 'unknown'),
+                    'file_path': entity.metadata.get('path', ''),
+                    'full_qualified_name': entity.full_qualified_name,
+                })
+                
+                examples_text = "Usage Examples:\n" + "\n\n".join(
+                    f"Example {i+1}:\n{example}"
+                    for i, example in enumerate(entity.usage_examples)
+                )
+                
+                doc_examples = Document(
+                    page_content=examples_text,
+                    metadata=examples_meta
+                )
+                vector_store.add_chunk(doc_examples)
+                chunks_created += 1
+
+            # Store configuration settings if available
+            if entity.config_settings:
+                config_meta = _filter_metadata({
+                    'type': 'configuration',
+                    'entity_name': entity.name,
+                    'entity_type': entity.type,
+                    'semantic_type': entity.semantic_type,
+                    'language': entity.metadata.get('language', 'unknown'),
+                    'file_path': entity.metadata.get('path', ''),
+                    'full_qualified_name': entity.full_qualified_name,
+                })
+                
+                config_text = "Configuration Settings:\n" + "\n".join(
+                    f"{k}: {v}"
+                    for k, v in sorted(entity.config_settings.items())
+                )
+                
+                doc_config = Document(
+                    page_content=config_text,
+                    metadata=config_meta
+                )
+                vector_store.add_chunk(doc_config)
                 chunks_created += 1
 
         except Exception as e:
             logger.error(f"Failed to ingest code entity {entity.name}: {str(e)}", exc_info=True)
+    
     return chunks_created
 
 def _filter_metadata(metadata: dict) -> dict:

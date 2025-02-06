@@ -1,7 +1,7 @@
 """Module for advanced retrieval and context management."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from pathlib import Path
 import numpy as np
 from sklearn.cluster import KMeans
@@ -20,8 +20,10 @@ class SearchResult:
     document: Document
     relevance_score: float
     semantic_cluster: Optional[int] = None
-    context_score: Optional[float] = None
-    conversation_relevance: Optional[float] = None
+    related_results: List[Document] = None
+    context_snippets: List[str] = None
+    relationship_chain: List[str] = None
+    semantic_summary: Optional[str] = None
 
 class AdvancedRetrieval:
     """Enhanced retrieval system with semantic clustering and context awareness."""
@@ -30,18 +32,18 @@ class AdvancedRetrieval:
         self,
         vector_store: 'VectorStore',
         memory: Optional['ConversationMemory'] = None,
-        num_clusters: int = 3
+        num_clusters: int = 3,
+        min_relevance: float = 0.3,
+        max_context_results: int = 5,
+        max_relationship_depth: int = 2
     ):
-        """Initialize the advanced retrieval system.
-        
-        Args:
-            vector_store: Vector store for document retrieval
-            memory: Optional conversation memory for context
-            num_clusters: Number of semantic clusters to use
-        """
+        """Initialize the advanced retrieval system."""
         self.vector_store = vector_store
         self.memory = memory
         self.num_clusters = num_clusters
+        self.min_relevance = min_relevance
+        self.max_context_results = max_context_results
+        self.max_relationship_depth = max_relationship_depth
         self.embeddings = vector_store.embeddings
         
         # Cache for embeddings and clusters
@@ -53,123 +55,290 @@ class AdvancedRetrieval:
         query: str,
         k: int = 4,
         metadata_filter: Optional[Dict[str, str]] = None,
-        min_relevance: float = 0.3
+        min_relevance: Optional[float] = None,
+        search_strategy: str = "comprehensive"
     ) -> List[SearchResult]:
-        """Perform an enhanced search with semantic clustering and context awareness.
+        """
+        Perform enhanced search with multiple strategies.
         
         Args:
             query: Search query
-            k: Number of results to return
-            metadata_filter: Optional metadata filters
-            min_relevance: Minimum relevance score threshold
-            
-        Returns:
-            List of enhanced search results
+            k: Number of results
+            metadata_filter: Optional metadata filter
+            min_relevance: Minimum relevance score (overrides instance default)
+            search_strategy: One of "fast", "comprehensive", or "deep"
+                - fast: Basic similarity search
+                - comprehensive: Multiple search passes with relationship exploration
+                - deep: Exhaustive search with full relationship traversal
         """
-        # Get base results from vector store
-        base_results = self.vector_store.similarity_search(
+        min_relevance = min_relevance or self.min_relevance
+        
+        if search_strategy == "fast":
+            return self._basic_search(query, k, metadata_filter, min_relevance)
+        elif search_strategy == "deep":
+            return self._deep_search(query, k, metadata_filter, min_relevance)
+        else:  # comprehensive (default)
+            return self._comprehensive_search(query, k, metadata_filter, min_relevance)
+    
+    def _basic_search(
+        self,
+        query: str,
+        k: int,
+        metadata_filter: Optional[Dict[str, str]],
+        min_relevance: float
+    ) -> List[SearchResult]:
+        """Perform basic similarity search."""
+        # Get raw results
+        results = self.vector_store.similarity_search(
             query,
-            k=k * 2,  # Get more results initially for filtering
+            k=k * 2,  # Get more results for filtering
             metadata_filter=metadata_filter,
-            use_advanced=False,  # Don't use advanced retrieval to prevent recursion
-            _from_advanced=True  # Mark as coming from advanced retrieval
+            _from_advanced=True  # Prevent recursion
         )
         
-        if not base_results:
-            return []
+        # Filter and convert results
+        search_results = []
+        for doc, score in results:
+            if score >= min_relevance:
+                search_results.append(SearchResult(
+                    document=doc,
+                    relevance_score=score,
+                    semantic_cluster=None,
+                    related_results=[],
+                    context_snippets=[],
+                    relationship_chain=[],
+                    semantic_summary=None
+                ))
         
-        # Convert to SearchResult objects
-        search_results = [
-            SearchResult(doc, score)
-            for doc, score in base_results
-            if score >= min_relevance
-        ]
-        
-        # Apply semantic clustering
-        self._cluster_results(search_results)
-        
-        # Apply conversation context scoring if available
-        if self.memory:
-            self._score_conversation_context(search_results)
-        
-        # Sort by combined relevance
-        search_results = self._rank_results(search_results)
-        
+        # Sort by relevance and limit
+        search_results.sort(key=lambda x: x.relevance_score, reverse=True)
         return search_results[:k]
     
-    def _cluster_results(self, results: List[SearchResult]):
-        """Apply semantic clustering to search results."""
+    def _comprehensive_search(
+        self,
+        query: str,
+        k: int,
+        metadata_filter: Optional[Dict[str, str]],
+        min_relevance: float
+    ) -> List[SearchResult]:
+        """Perform comprehensive search with relationship exploration."""
+        # First get basic results
+        results = self._basic_search(query, k, metadata_filter, min_relevance)
         if not results:
-            return
+            return []
         
-        # Get or compute document embeddings
-        embeddings = []
+        # Enhance results with related information
+        enhanced_results = []
         for result in results:
-            doc_id = result.document.metadata.get('name', result.document.page_content[:100])
-            if doc_id not in self._document_embeddings:
-                self._document_embeddings[doc_id] = self.embeddings.embed_query(
-                    result.document.page_content
-                )
-            embeddings.append(self._document_embeddings[doc_id])
-        
-        # Perform clustering
-        if len(results) >= self.num_clusters:
-            kmeans = KMeans(
-                n_clusters=min(self.num_clusters, len(results)),
-                random_state=42
-            )
-            clusters = kmeans.fit_predict(embeddings)
+            # Get related documents through relationships
+            related_docs = self._get_related_documents(result.document, depth=1)
             
-            # Assign clusters to results
-            for result, cluster in zip(results, clusters):
-                result.semantic_cluster = int(cluster)
-        else:
-            # Not enough results for clustering
-            for result in results:
-                result.semantic_cluster = 0
+            # Get context snippets
+            context_snippets = self._extract_context_snippets(result.document)
+            
+            # Build relationship chain
+            relationship_chain = self._build_relationship_chain(result.document)
+            
+            # Generate semantic summary if possible
+            semantic_summary = self._generate_summary(result.document)
+            
+            # Create enhanced result
+            enhanced_results.append(SearchResult(
+                document=result.document,
+                relevance_score=result.relevance_score,
+                semantic_cluster=result.semantic_cluster,
+                related_results=related_docs,
+                context_snippets=context_snippets,
+                relationship_chain=relationship_chain,
+                semantic_summary=semantic_summary
+            ))
+        
+        # Perform semantic clustering
+        if len(enhanced_results) > 1:
+            self._cluster_results(enhanced_results)
+        
+        return enhanced_results
     
-    def _score_conversation_context(self, results: List[SearchResult]):
-        """Score results based on conversation context."""
-        if not self.memory or not results:
-            return
+    def _deep_search(
+        self,
+        query: str,
+        k: int,
+        metadata_filter: Optional[Dict[str, str]],
+        min_relevance: float
+    ) -> List[SearchResult]:
+        """Perform deep search with exhaustive relationship traversal."""
+        # Start with comprehensive search
+        results = self._comprehensive_search(query, k * 2, metadata_filter, min_relevance)
+        if not results:
+            return []
         
-        # Get conversation context
-        context = self.memory.get_context()
-        if not context:
-            return
-        
-        # Embed context
-        context_embedding = self.embeddings.embed_query(context)
-        
-        # Score each result against context
+        # Collect all related documents up to max depth
+        all_docs = set()
         for result in results:
-            doc_id = result.document.metadata.get('name', result.document.page_content[:100])
-            if doc_id not in self._document_embeddings:
-                self._document_embeddings[doc_id] = self.embeddings.embed_query(
-                    result.document.page_content
+            # Get deeply related documents
+            related = self._get_related_documents(
+                result.document,
+                depth=self.max_relationship_depth
+            )
+            all_docs.update(related)
+        
+        # Re-rank all documents
+        all_results = []
+        query_embedding = self.embeddings.embed_query(query)
+        
+        for doc in all_docs:
+            # Get document embedding
+            if doc.page_content not in self._document_embeddings:
+                self._document_embeddings[doc.page_content] = (
+                    self.embeddings.embed_documents([doc.page_content])[0]
                 )
+            doc_embedding = self._document_embeddings[doc.page_content]
             
-            # Calculate cosine similarity with context
+            # Calculate similarity
             similarity = cosine_similarity(
-                [context_embedding],
-                [self._document_embeddings[doc_id]]
+                [query_embedding],
+                [doc_embedding]
             )[0][0]
             
-            result.conversation_relevance = float(similarity)
-    
-    def _rank_results(self, results: List[SearchResult]) -> List[SearchResult]:
-        """Rank results using all available scores."""
-        for result in results:
-            # Combine scores (with weights)
-            base_score = result.relevance_score
-            context_score = result.conversation_relevance or 0.0
-            
-            # Calculate combined score
-            # Weight: 70% base relevance, 30% conversation context
-            result.context_score = (0.7 * base_score) + (0.3 * context_score)
+            if similarity >= min_relevance:
+                # Create search result with full context
+                result = SearchResult(
+                    document=doc,
+                    relevance_score=similarity,
+                    semantic_cluster=None,
+                    related_results=self._get_related_documents(doc, depth=1),
+                    context_snippets=self._extract_context_snippets(doc),
+                    relationship_chain=self._build_relationship_chain(doc),
+                    semantic_summary=self._generate_summary(doc)
+                )
+                all_results.append(result)
         
-        # Sort by combined score
-        return sorted(results, key=lambda x: x.context_score or 0.0, reverse=True)
+        # Sort by relevance and cluster
+        all_results.sort(key=lambda x: x.relevance_score, reverse=True)
+        if len(all_results) > 1:
+            self._cluster_results(all_results)
+        
+        return all_results[:k]
+    
+    def _get_related_documents(
+        self,
+        document: Document,
+        depth: int = 1
+    ) -> List[Document]:
+        """Get related documents through relationships."""
+        related = []
+        
+        # Extract relationship information
+        relationships = {}
+        for key, value in document.metadata.items():
+            if key.endswith('_entities') or key in ('dependencies', 'related_files'):
+                relationships[key] = set(value.split(',')) if value else set()
+        
+        # Collect related documents
+        for rel_type, entities in relationships.items():
+            for entity in entities:
+                # Search for the related entity
+                related_results = self.vector_store.similarity_search(
+                    entity,
+                    k=1,
+                    metadata_filter={'name': entity},
+                    _from_advanced=True
+                )
+                if related_results:
+                    related.append(related_results[0][0])
+                    
+                    # Recurse if needed
+                    if depth > 1:
+                        deeper_related = self._get_related_documents(
+                            related_results[0][0],
+                            depth=depth-1
+                        )
+                        related.extend(deeper_related)
+        
+        return related[:self.max_context_results]
+    
+    def _extract_context_snippets(self, document: Document) -> List[str]:
+        """Extract relevant context snippets from the document."""
+        snippets = []
+        
+        # Add surrounding context if available
+        if 'surrounding_context' in document.metadata:
+            snippets.append(document.metadata['surrounding_context'])
+        
+        # Add file context if available
+        if 'file_context' in document.metadata:
+            snippets.append(document.metadata['file_context'])
+        
+        # Add module documentation if available
+        if 'module_doc' in document.metadata:
+            snippets.append(document.metadata['module_doc'])
+        
+        return snippets
+    
+    def _build_relationship_chain(self, document: Document) -> List[str]:
+        """Build a chain of relationships for the document."""
+        chain = []
+        
+        # Start with parent relationship
+        if document.metadata.get('parent'):
+            chain.append(f"Child of {document.metadata['parent']}")
+        
+        # Add package/module information
+        if document.metadata.get('package'):
+            chain.append(f"In package {document.metadata['package']}")
+        if document.metadata.get('module'):
+            chain.append(f"In module {document.metadata['module']}")
+        
+        # Add implementation relationships
+        if document.metadata.get('implements'):
+            chain.append(f"Implements {document.metadata['implements']}")
+        
+        # Add usage relationships
+        if document.metadata.get('used_by'):
+            chain.append(f"Used by {document.metadata['used_by']}")
+        
+        return chain
+    
+    def _generate_summary(self, document: Document) -> Optional[str]:
+        """Generate or retrieve semantic summary."""
+        # Use existing summary if available
+        if document.metadata.get('semantic_summary'):
+            return document.metadata['semantic_summary']
+        
+        # Combine available documentation
+        summary_parts = []
+        if document.metadata.get('docstring'):
+            summary_parts.append(document.metadata['docstring'])
+        if document.metadata.get('semantic_type'):
+            summary_parts.append(
+                f"This is a {document.metadata['semantic_type']} "
+                f"in {document.metadata.get('language', 'unknown')}"
+            )
+        
+        return " ".join(summary_parts) if summary_parts else None
+    
+    def _cluster_results(self, results: List[SearchResult]) -> None:
+        """Perform semantic clustering on search results."""
+        if len(results) < 2:
+            return
+        
+        # Get embeddings for all documents
+        embeddings = []
+        for result in results:
+            if result.document.page_content not in self._document_embeddings:
+                self._document_embeddings[result.document.page_content] = (
+                    self.embeddings.embed_documents([result.document.page_content])[0]
+                )
+            embeddings.append(self._document_embeddings[result.document.page_content])
+        
+        # Perform clustering
+        num_clusters = min(self.num_clusters, len(results))
+        kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+        clusters = kmeans.fit_predict(embeddings)
+        
+        # Assign clusters
+        for result, cluster in zip(results, clusters):
+            result.semantic_cluster = int(cluster)
     
     def get_cluster_summary(self, results: List[SearchResult]) -> Dict[int, List[str]]:
         """Get a summary of documents in each semantic cluster.

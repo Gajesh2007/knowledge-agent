@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union
 
 from chromadb import PersistentClient, Settings
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEndpointEmbeddings, HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 
 from knowledge_agent.core.logging import logger
 from knowledge_agent.core.retrieval import AdvancedRetrieval, SearchResult
@@ -19,11 +20,8 @@ class VectorStore:
         self.persist_directory = persist_directory
         logger.debug(f"Initializing vector store at {persist_directory}")
         
-        logger.debug("Loading HuggingFace embeddings model")
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-mpnet-base-v2",
-            model_kwargs={"device": "cpu"},
-        )
+        # Initialize embeddings based on configuration
+        self.embeddings = self._initialize_embeddings()
         
         # Create the persist directory if it doesn't exist
         persist_path = Path(persist_directory).resolve()
@@ -56,6 +54,52 @@ class VectorStore:
         
         # Initialize advanced retrieval
         self.advanced_retrieval = None
+    
+    def _initialize_embeddings(self) -> Embeddings:
+        """Initialize embeddings based on configuration.
+        
+        Returns:
+            Embeddings: Configured embedding model
+        """
+        embedding_type = os.getenv("EMBEDDING_TYPE", "hosted").lower()
+        model_name = os.getenv("EMBEDDING_MODEL", "Alibaba-NLP/gte-Qwen2-7B-instruct")
+        api_key = os.getenv("HUGGINGFACE_API_KEY")
+        endpoint_url = os.getenv("HUGGINGFACE_ENDPOINT_URL")
+        device = os.getenv("EMBEDDING_DEVICE", "mps" if os.path.exists("/dev/mps0") else "cpu")
+        
+        logger.debug(f"Initializing embeddings with type: {embedding_type}")
+        
+        try:
+            if embedding_type == "hosted":
+                if not api_key:
+                    raise ValueError("HUGGINGFACE_API_KEY is required for hosted embeddings")
+                    
+                if endpoint_url:
+                    logger.debug("Using HuggingFace Inference Endpoint")
+                    return HuggingFaceEndpointEmbeddings(
+                        endpoint_url=endpoint_url,
+                        huggingfacehub_api_token=api_key,
+                        task="sentence-similarity",  # Correct task for GTE models in endpoints
+                        retry_on_error=True,
+                    )
+                else:
+                    logger.debug("Using HuggingFace Inference API")
+                    return HuggingFaceEmbeddings(
+                        model_name=model_name,
+                        api_key=api_key,
+                        task="feature-extraction",  # Correct task for Inference API
+                        encode_kwargs={"batch_size": 32}
+                    )
+            else:
+                logger.debug("Using local HuggingFace embeddings")
+                return HuggingFaceEmbeddings(
+                    model_name=model_name,
+                    model_kwargs={"device": device},
+                    encode_kwargs={"device": device, "batch_size": 32}
+                )
+        except Exception as e:
+            logger.error(f"Failed to initialize embeddings: {str(e)}")
+            raise ValueError(f"Failed to initialize embeddings: {str(e)}") from e
     
     def add_chunk(self, chunk: Document) -> None:
         """Add a single document chunk to the vector store."""
