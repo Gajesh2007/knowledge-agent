@@ -28,7 +28,6 @@ SUPPORTED_CODE_EXTENSIONS = {
     '.css': 'CSS',
     '.go': 'Go',
     '.rs': 'Rust',
-    '.sol': 'Solidity',
 }
 
 SUPPORTED_DOC_EXTENSIONS = {
@@ -40,6 +39,7 @@ SUPPORTED_DOC_EXTENSIONS = {
     '.yaml': 'YAML',
     '.yml': 'YAML',
     '.toml': 'TOML',
+    '.sol': 'Solidity',  # Treat Solidity files as documentation
 }
 
 EXCLUDED_DIRECTORIES = {
@@ -55,10 +55,10 @@ EXCLUDED_DIRECTORIES = {
     '.vscode',
     'coverage',
     '.github',  # GitHub specific files
-    'certora',  # Certora verification files
-    'test',     # Test files
-    'tests',
-    'script',   # Build/deployment scripts
+    # 'certora',  # Allow Certora verification files for Solidity
+    # 'test',     # Allow test files for Solidity
+    # 'tests',    # Allow test files for Solidity
+    # 'script',   # Allow build/deployment scripts for Solidity
 }
 
 EXCLUDED_FILES = {
@@ -84,19 +84,21 @@ EXCLUDED_FILES = {
 
 def is_supported_file(file_path: Path) -> bool:
     """Check if a file is supported for ingestion."""
-    # Skip excluded directories
-    for parent in file_path.parents:
-        if parent.name.lower() in EXCLUDED_DIRECTORIES:
+    # Skip excluded directories (but allow test directories for Solidity)
+    if file_path.suffix.lower() != '.sol':
+        for parent in file_path.parents:
+            if parent.name.lower() in EXCLUDED_DIRECTORIES:
+                return False
+
+    # Skip excluded files (but allow test files for Solidity)
+    if file_path.suffix.lower() != '.sol' and file_path.name.lower() in EXCLUDED_FILES:
+        return False
+
+    # Skip typical test file naming patterns (but allow for Solidity)
+    if file_path.suffix.lower() != '.sol':
+        fname = file_path.name.lower()
+        if fname.startswith('test_') or fname.endswith('.test.js'):
             return False
-
-    # Skip excluded files
-    if file_path.name.lower() in EXCLUDED_FILES:
-        return False
-
-    # Skip typical test file naming patterns
-    fname = file_path.name.lower()
-    if fname.startswith('test_') or fname.endswith('.test.js'):
-        return False
 
     # Check if recognized code or doc extension
     suffix = file_path.suffix.lower()

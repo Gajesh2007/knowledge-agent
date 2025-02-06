@@ -586,6 +586,78 @@ class TomlParser(DocParser):
         # TOML content is already structured, so no additional metadata extraction needed
         return {}
 
+class SolidityParser(DocParser):
+    """Parser for Solidity files that treats them as documentation."""
+    
+    def parse_file(self, file_path: Path) -> List[DocSection]:
+        try:
+            content = file_path.read_text(encoding='utf-8')
+            
+            # Extract imports using regex
+            import re
+            imports = []
+            for match in re.finditer(r'import\s+(?:{[^}]+}\s+from\s+)?["\']([^"\']+)["\'];', content):
+                imports.append(match.group(1))
+            
+            # Extract contract names
+            contracts = []
+            for match in re.finditer(r'(?:contract|interface|library)\s+(\w+)', content):
+                contracts.append(match.group(1))
+                
+            # Create metadata
+            metadata = {
+                "language": "solidity",
+                "imports": ", ".join(imports) if imports else "",
+                "contracts": ", ".join(contracts) if contracts else "",
+                "file_name": file_path.name,
+            }
+            
+            # Create a section for the whole file
+            return [DocSection(
+                content=content,
+                title=f"Solidity: {file_path.name}",
+                source_file=file_path,
+                line_number=1,
+                content_type="solidity",
+                metadata=metadata
+            )]
+            
+        except Exception as e:
+            logger.error(f"Failed to parse Solidity file {file_path}: {e}", exc_info=True)
+            return []
+
+    def extract_metadata(self, content: str) -> Dict[str, str]:
+        """Extract metadata from Solidity content."""
+        metadata = {}
+        try:
+            # Extract imports
+            imports = []
+            for match in re.finditer(r'import\s+(?:{[^}]+}\s+from\s+)?["\']([^"\']+)["\'];', content):
+                imports.append(match.group(1))
+            if imports:
+                metadata['imports'] = ', '.join(imports)
+            
+            # Extract contract names
+            contracts = []
+            for match in re.finditer(r'(?:contract|interface|library)\s+(\w+)', content):
+                contracts.append(match.group(1))
+            if contracts:
+                metadata['contracts'] = ', '.join(contracts)
+                
+            # Extract SPDX license if present
+            license_match = re.search(r'SPDX-License-Identifier:\s*(.+)', content)
+            if license_match:
+                metadata['license'] = license_match.group(1).strip()
+                
+            # Extract pragma statements
+            pragma_match = re.search(r'pragma\s+solidity\s+([^;]+);', content)
+            if pragma_match:
+                metadata['solidity_version'] = pragma_match.group(1).strip()
+                
+        except Exception as e:
+            logger.error(f"Failed to extract Solidity metadata: {e}", exc_info=True)
+        return metadata
+
 class ParserFactory:
     """Factory for creating document format-specific parsers."""
     
@@ -600,6 +672,7 @@ class ParserFactory:
         '.yml': YamlParser,
         '.json': JsonParser,
         '.toml': TomlParser,
+        '.sol': SolidityParser,
     }
     
     @classmethod

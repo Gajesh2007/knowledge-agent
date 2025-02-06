@@ -9,10 +9,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from langchain_core.documents import Document
 from knowledge_agent.core.logging import logger
-from knowledge_agent.core.conversation import ConversationMemory
 
-# Use TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
+    from knowledge_agent.core.conversation import ConversationMemory
     from knowledge_agent.core.vector_store import VectorStore
 
 @dataclass
@@ -29,8 +28,8 @@ class AdvancedRetrieval:
     
     def __init__(
         self,
-        vector_store: "VectorStore",
-        memory: Optional[ConversationMemory] = None,
+        vector_store: 'VectorStore',
+        memory: Optional['ConversationMemory'] = None,
         num_clusters: int = 3
     ):
         """Initialize the advanced retrieval system.
@@ -71,7 +70,9 @@ class AdvancedRetrieval:
         base_results = self.vector_store.similarity_search(
             query,
             k=k * 2,  # Get more results initially for filtering
-            metadata_filter=metadata_filter
+            metadata_filter=metadata_filter,
+            use_advanced=False,  # Don't use advanced retrieval to prevent recursion
+            _from_advanced=True  # Mark as coming from advanced retrieval
         )
         
         if not base_results:

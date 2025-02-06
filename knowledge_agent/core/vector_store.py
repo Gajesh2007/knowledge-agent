@@ -91,23 +91,36 @@ class VectorStore:
         query: str,
         k: int = 4,
         metadata_filter: Optional[Dict[str, str]] = None,
-        use_advanced: bool = True
+        use_advanced: bool = True,
+        _from_advanced: bool = False  # Internal flag to prevent recursion
     ) -> Union[List[Tuple[Document, float]], List[SearchResult]]:
-        """Search for similar documents in the vector store.
+        """
+        Perform similarity search on the vector store.
         
         Args:
-            query: Search query
+            query: Search query string
             k: Number of results to return
-            metadata_filter: Optional metadata filters
-            use_advanced: Whether to use advanced retrieval features
+            metadata_filter: Optional metadata filter
+            use_advanced: Whether to use advanced retrieval
+            _from_advanced: Internal flag to indicate if this call is from AdvancedRetrieval
             
         Returns:
-            List of (document, score) tuples or SearchResult objects
+            List of (document, score) tuples or SearchResults
         """
         try:
-            logger.debug(f"Performing similarity search for query: {query} (k={k})")
+            # Get raw results from vector store
+            results = self.db.similarity_search_with_score(
+                query,
+                k=k,
+                filter=metadata_filter
+            )
             
-            if use_advanced:
+            # Convert to document tuples
+            doc_results = []
+            for doc, score in results:
+                doc_results.append((doc, float(score)))
+            
+            if use_advanced and not _from_advanced:  # Only use advanced if not already in advanced
                 # Use advanced retrieval if requested
                 if not self.advanced_retrieval:
                     self.advanced_retrieval = AdvancedRetrieval(self)
@@ -118,23 +131,10 @@ class VectorStore:
                     metadata_filter=metadata_filter
                 )
                 
-                # Get cluster summary for logging
-                clusters = self.advanced_retrieval.get_cluster_summary(results)
-                logger.debug("Search results by cluster:")
-                for cluster_id, docs in clusters.items():
-                    logger.debug(f"Cluster {cluster_id}: {', '.join(docs)}")
-                
                 return results
-            else:
-                # Use basic similarity search
-                results = self.db.similarity_search_with_score(
-                    query,
-                    k=k,
-                    filter=metadata_filter
-                )
-                logger.debug(f"Found {len(results)} results")
-                return [(doc, score) for doc, score in results]
                 
+            return doc_results
+            
         except Exception as e:
             logger.error("Error searching vector store", exc_info=e)
             return []

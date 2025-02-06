@@ -7,9 +7,10 @@ import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from knowledge_agent.core.llm import LLMHandler
+if TYPE_CHECKING:
+    from knowledge_agent.core.llm import LLMHandler
 from knowledge_agent.core.logging import logger
 
 @dataclass
@@ -33,7 +34,7 @@ class ConversationMemory:
     
     def __init__(
         self,
-        llm_handler: LLMHandler,
+        llm_handler: Optional['LLMHandler'] = None,
         session_id: Optional[str] = None,
         max_messages: int = 10,
         storage_dir: str = "./.conversations"

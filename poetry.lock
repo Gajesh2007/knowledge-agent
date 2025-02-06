@@ -4629,14 +4629,14 @@ vision = ["Pillow (>=10.0.1,<=15.0)"]
 
 [[package]]
 name = "tree-sitter"
-version = "0.20.1"
+version = "0.19.0"
 description = "Python bindings to the Tree-sitter parsing library"
 optional = false
 python-versions = ">=3.3"
 groups = ["main"]
 files = [
-    {file = "tree_sitter-0.20.1-cp39-cp39-macosx_12_0_arm64.whl", hash = "sha256:6f11a1fd909dcf569e7b1d98861a837436799e757bbbc5cd5280989050929e12"},
-    {file = "tree_sitter-0.20.1.tar.gz", hash = "sha256:e93f082c545d6649bcfb5d681ed255eb004a6ce22988971a128f40692feec60d"},
+    {file = "tree_sitter-0.19.0-cp38-cp38-macosx_10_14_x86_64.whl", hash = "sha256:03fd05fe099639d4aec1b59dec630a69d32e3d07a078d83bc060209a8dbb2132"},
+    {file = "tree_sitter-0.19.0.tar.gz", hash = "sha256:861afcf39f957fdd75f8b93124bc403f2f3abe8b81f104c05b1a749e6dd33499"},
 ]
 
 [[package]]
@@ -5361,4 +5361,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.9,<3.12"
-content-hash = "0257b886374c68cd5a3b5c254c1236823a510bde145b489becc64915f97552c7"
+content-hash = "07e86ad18ba568dfd0e493867d6a5a0e57b5a0d1906bad3d16db0a28d6ce43b7"

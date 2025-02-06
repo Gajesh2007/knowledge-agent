@@ -1,12 +1,17 @@
 """LLM functionality for handling interactions with Claude."""
 import os
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Union, TYPE_CHECKING
+import time
 
 from anthropic import Anthropic
+from anthropic.types import RateLimitError
 from langchain_core.documents import Document
 
 from knowledge_agent.core.logging import logger
 from knowledge_agent.core.role_manager import RoleManager
+
+if TYPE_CHECKING:
+    from knowledge_agent.core.retrieval import SearchResult
 
 DEFAULT_SYSTEM_PROMPT = """You are a knowledgeable assistant that helps users understand code and documentation.
 Your task is to provide accurate, helpful responses based on the context provided.
@@ -23,7 +28,11 @@ class LLMHandler:
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY environment variable not set")
         
-        self.client = Anthropic(api_key=api_key)
+        self.client = Anthropic(
+            api_key=api_key,
+            max_retries=3,  # Maximum number of retries
+            timeout=30.0,   # Timeout in seconds
+        )
         self.model = os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229")
         self.role_manager = RoleManager()
         
@@ -57,7 +66,7 @@ class LLMHandler:
     def generate_response(
         self,
         query: str,
-        documents: List[Document],
+        documents: List[Union[Document, 'SearchResult']],
         role_name: Optional[str] = None,
         context_type: Optional[str] = None,
         conversation_context: Optional[str] = None,
@@ -76,6 +85,8 @@ class LLMHandler:
         Returns:
             Generated response text
         """
+        from knowledge_agent.core.retrieval import SearchResult  # Import here to avoid circular import
+        
         # Build the system prompt
         system_prompt = self.base_prompt
         
@@ -96,54 +107,68 @@ class LLMHandler:
         # Add relevant documents
         context_parts.append("\nRelevant code and documentation:")
         for doc in documents:
+            # Handle both Document and SearchResult objects
+            if isinstance(doc, SearchResult):
+                document = doc.document
+                relevance = doc.relevance_score
+            else:
+                document = doc
+                relevance = None
+            
             # Add metadata context
             meta_context = []
-            if 'language' in doc.metadata:
-                meta_context.append(f"Language: {doc.metadata['language']}")
-            if 'type' in doc.metadata:
-                meta_context.append(f"Type: {doc.metadata['type']}")
-            if 'name' in doc.metadata:
-                meta_context.append(f"Name: {doc.metadata['name']}")
-            if 'file_path' in doc.metadata:
-                meta_context.append(f"File: {doc.metadata['file_path']}")
+            if 'language' in document.metadata:
+                meta_context.append(f"Language: {document.metadata['language']}")
+            if 'type' in document.metadata:
+                meta_context.append(f"Type: {document.metadata['type']}")
+            if 'name' in document.metadata:
+                meta_context.append(f"File: {document.metadata['name']}")
             
-            # Add version info if available
-            if 'commit_hash' in doc.metadata:
-                meta_context.append(f"Version: {doc.metadata['commit_hash'][:8]}")
-                if 'commit_message' in doc.metadata:
-                    message = doc.metadata['commit_message'].split('\n')[0]
-                    meta_context.append(f"Change: {message}")
+            # Add relevance score if available
+            if relevance is not None:
+                meta_context.append(f"Relevance: {relevance:.2f}")
             
-            context_parts.append(
-                f"\n{'=' * 40}\n"
-                f"{', '.join(meta_context)}\n\n"
-                f"{doc.page_content}"
-            )
+            meta_str = " | ".join(meta_context)
+            if meta_str:
+                context_parts.append(f"\n{meta_str}")
+            
+            # Add document content
+            content = document.page_content.strip()
+            if content:
+                context_parts.append(f"```\n{content}\n```\n")
         
         # Combine everything
-        messages = [
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Context:\n{chr(10).join(context_parts)}\n\n"
-                    f"Question: {query}"
-                )
-            }
-        ]
-        
         try:
             logger.debug("Sending request to Claude")
-            response = self.client.messages.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_tokens
-            )
-            return response.content[0].text
+            max_retries = 3
+            retry_delay = 1.0  # Initial delay in seconds
             
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.messages.create(
+                        model=self.model,
+                        system=system_prompt,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Context:\n{chr(10).join(context_parts)}\n\n"
+                                    f"Question: {query}"
+                                )
+                            }
+                        ],
+                        max_tokens=max_tokens
+                    )
+                    return response.content[0].text
+                    
+                except RateLimitError as e:
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Rate limit hit, retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                    else:
+                        raise
+                        
         except Exception as e:
             logger.error("Failed to generate response", exc_info=e)
             return f"Error generating response: {str(e)}"
