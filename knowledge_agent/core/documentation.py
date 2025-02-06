@@ -235,8 +235,9 @@ class DocumentationGenerator:
         # Create diagram
         with Diagram(
             "Architecture Overview",
-            filename=str(output_path),
-            show=False
+            filename=str(output_path.with_suffix("")),  # Diagram adds .png automatically
+            show=False,
+            direction="LR"
         ):
             with Cluster("Core"):
                 modules = {

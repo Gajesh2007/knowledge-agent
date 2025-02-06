@@ -2,12 +2,66 @@
 
 import ast
 import logging
+import os
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
 
+import tree_sitter
+from tree_sitter import Language, Parser
+
 logger = logging.getLogger(__name__)
+
+# Initialize tree-sitter languages
+LANGUAGE_DIR = Path(__file__).parent / "build" / "languages"
+LANGUAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Clone language repositories if they don't exist
+LANGUAGE_REPOS = {
+    'javascript': 'https://github.com/tree-sitter/tree-sitter-javascript',
+    'typescript': 'https://github.com/tree-sitter/tree-sitter-typescript',
+    'cpp': 'https://github.com/tree-sitter/tree-sitter-cpp',
+    'html': 'https://github.com/tree-sitter/tree-sitter-html',
+    'css': 'https://github.com/tree-sitter/tree-sitter-css',
+}
+
+# Initialize languages
+LANGUAGES = {}
+
+def init_languages():
+    """Initialize tree-sitter languages."""
+    global LANGUAGES
+    
+    # Clone repositories if needed
+    for lang_name, repo_url in LANGUAGE_REPOS.items():
+        lang_dir = LANGUAGE_DIR / f"tree-sitter-{lang_name}"
+        if not lang_dir.exists():
+            try:
+                subprocess.run(['git', 'clone', repo_url, str(lang_dir)], check=True)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to clone {lang_name} grammar: {str(e)}")
+    
+    # Build language library
+    try:
+        Language.build_library(
+            str(LANGUAGE_DIR / "languages.so"),
+            [str(LANGUAGE_DIR / d) for d in LANGUAGE_DIR.iterdir() if d.is_dir()]
+        )
+        
+        # Load all languages
+        for lang_name in LANGUAGE_REPOS:
+            try:
+                LANGUAGES[lang_name] = Language(str(LANGUAGE_DIR / "languages.so"), lang_name)
+            except Exception as e:
+                logger.error(f"Failed to load {lang_name} language: {str(e)}")
+                LANGUAGES[lang_name] = None
+    except Exception as e:
+        logger.error(f"Failed to build tree-sitter languages: {str(e)}")
+
+# Initialize languages on module load
+init_languages()
 
 @dataclass
 class CodeEntity:
@@ -34,6 +88,158 @@ class LanguageParser(ABC):
     def extract_dependencies(self, content: str) -> Set[str]:
         """Extract import dependencies from code content."""
         pass
+
+class TreeSitterParser(LanguageParser):
+    """Base class for tree-sitter based parsers."""
+    
+    def __init__(self, language_name: str):
+        """Initialize the parser with a specific language."""
+        self.parser = Parser()
+        self.language_name = language_name
+        language = LANGUAGES.get(language_name)
+        if language is None:
+            raise ValueError(f"Language {language_name} not available")
+        self.parser.set_language(language)
+    
+    def _get_node_text(self, node, content: str) -> str:
+        """Get the text content of a node."""
+        return content[node.start_byte:node.end_byte].decode('utf-8')
+    
+    def _get_docstring(self, node, content: str) -> Optional[str]:
+        """Extract docstring/comments for a node."""
+        comments = []
+        for child in node.children:
+            if child.type == 'comment':
+                comments.append(self._get_node_text(child, content))
+        return '\n'.join(comments) if comments else None
+
+class JavaScriptParser(TreeSitterParser):
+    """Parser for JavaScript and JSX code."""
+    
+    def __init__(self):
+        """Initialize the JavaScript parser."""
+        super().__init__("javascript")
+    
+    def parse_file(self, file_path: Path) -> List[CodeEntity]:
+        """Parse a JavaScript file."""
+        entities = []
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read()
+                tree = self.parser.parse(content)
+                
+                # Process functions and classes
+                for node in self._traverse(tree.root_node):
+                    if node.type in ('function_declaration', 'method_definition', 'class_declaration'):
+                        name = None
+                        for child in node.children:
+                            if child.type == 'identifier':
+                                name = self._get_node_text(child, content)
+                                break
+                        
+                        if name:
+                            entities.append(CodeEntity(
+                                name=name,
+                                type=node.type.replace('_declaration', '').replace('_definition', ''),
+                                docstring=self._get_docstring(node, content),
+                                code=self._get_node_text(node, content),
+                                start_line=node.start_point[0] + 1,
+                                end_line=node.end_point[0] + 1,
+                                parent=None,  # TODO: Handle nested classes/functions
+                                dependencies=self.extract_dependencies(content),
+                                metadata={'language': self.language_name, 'path': str(file_path)}
+                            ))
+        except Exception as e:
+            logger.error(f"Failed to parse {file_path}: {str(e)}")
+        return entities
+    
+    def extract_dependencies(self, content: str) -> Set[str]:
+        """Extract import dependencies from JavaScript code."""
+        dependencies = set()
+        try:
+            tree = self.parser.parse(content)
+            for node in self._traverse(tree.root_node):
+                if node.type == 'import_statement':
+                    for child in node.children:
+                        if child.type == 'string':
+                            dependencies.add(self._get_node_text(child, content).strip('"\''))
+        except Exception as e:
+            logger.error(f"Failed to extract dependencies: {str(e)}")
+        return dependencies
+    
+    def _traverse(self, node):
+        """Traverse the AST."""
+        yield node
+        for child in node.children:
+            yield from self._traverse(child)
+
+class TypeScriptParser(TreeSitterParser):
+    """Parser for TypeScript and TSX code."""
+    
+    def __init__(self):
+        """Initialize the TypeScript parser."""
+        super().__init__("typescript")
+    
+    def parse_file(self, file_path: Path) -> List[CodeEntity]:
+        """Parse a TypeScript file."""
+        # Similar to JavaScriptParser but with TypeScript-specific handling
+        return []  # TODO: Implement TypeScript parsing
+    
+    def extract_dependencies(self, content: str) -> Set[str]:
+        """Extract import dependencies from TypeScript code."""
+        # Similar to JavaScriptParser
+        return set()  # TODO: Implement TypeScript dependency extraction
+
+class CppParser(TreeSitterParser):
+    """Parser for C++ code."""
+    
+    def __init__(self):
+        """Initialize the C++ parser."""
+        super().__init__("cpp")
+    
+    def parse_file(self, file_path: Path) -> List[CodeEntity]:
+        """Parse a C++ file."""
+        # TODO: Implement C++ parsing
+        return []
+    
+    def extract_dependencies(self, content: str) -> Set[str]:
+        """Extract include dependencies from C++ code."""
+        # TODO: Implement C++ dependency extraction
+        return set()
+
+class HtmlParser(TreeSitterParser):
+    """Parser for HTML code."""
+    
+    def __init__(self):
+        """Initialize the HTML parser."""
+        super().__init__("html")
+    
+    def parse_file(self, file_path: Path) -> List[CodeEntity]:
+        """Parse an HTML file."""
+        # TODO: Implement HTML parsing
+        return []
+    
+    def extract_dependencies(self, content: str) -> Set[str]:
+        """Extract dependencies (scripts, stylesheets) from HTML code."""
+        # TODO: Implement HTML dependency extraction
+        return set()
+
+class CssParser(TreeSitterParser):
+    """Parser for CSS code."""
+    
+    def __init__(self):
+        """Initialize the CSS parser."""
+        super().__init__("css")
+    
+    def parse_file(self, file_path: Path) -> List[CodeEntity]:
+        """Parse a CSS file."""
+        # TODO: Implement CSS parsing
+        return []
+    
+    def extract_dependencies(self, content: str) -> Set[str]:
+        """Extract dependencies (@import) from CSS code."""
+        # TODO: Implement CSS dependency extraction
+        return set()
 
 class PythonParser(LanguageParser):
     """Parser for Python code using the ast module."""
@@ -132,10 +338,14 @@ class ParserFactory:
     
     _parsers = {
         '.py': PythonParser,
-        # Add more parsers as they're implemented:
-        # '.go': GoParser,
-        # '.rs': RustParser,
-        # '.sol': SolidityParser,
+        '.js': JavaScriptParser,
+        '.jsx': JavaScriptParser,  # JSX uses the JavaScript parser
+        '.ts': TypeScriptParser,
+        '.tsx': TypeScriptParser,  # TSX uses the TypeScript parser
+        '.cpp': CppParser,
+        '.c': CppParser,  # C files can use the C++ parser
+        '.html': HtmlParser,
+        '.css': CssParser,
     }
     
     @classmethod

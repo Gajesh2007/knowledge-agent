@@ -19,6 +19,59 @@ A powerful command-line tool that helps you understand your codebase through nat
   - Maintains context between queries
   - Provides relevant code snippets and explanations
 
+### Supported File Types
+
+#### Code Files
+- `.py`: Python files with AST-based parsing
+- `.js`, `.jsx`: JavaScript and React files
+- `.ts`, `.tsx`: TypeScript and React TypeScript files
+- `.cpp`, `.c`: C++ and C files
+- `.html`: HTML files
+- `.css`: CSS files
+- `.go`: Go files
+- `.rs`: Rust files
+- `.sol`: Solidity files
+
+#### Documentation Files
+- `.md`: Markdown files with YAML frontmatter support
+  - Section splitting based on headers
+  - Metadata extraction from frontmatter
+  - Support for both `#` and `===`/`---` style headers
+
+- `.rst`: reStructuredText files
+  - Section detection with underlined headers
+  - Field list metadata extraction
+  - Support for multiple header levels
+
+- `.txt`: Plain text files
+  - Section splitting based on blank lines
+  - Basic metadata extraction from content
+  - Automatic title detection
+
+- `.pdf`: PDF documents
+  - Page-based section splitting
+  - Text extraction with PyPDF2
+
+- `.tex`: LaTeX documents
+  - Section-based splitting
+  - Metadata extraction (title, author, date)
+  - Plain text conversion
+
+- `.yaml`, `.yml`: YAML files
+  - Structured data parsing
+  - Hierarchical section organization
+  - Full metadata support
+
+- `.json`: JSON files
+  - Structured data parsing
+  - Nested object support
+  - Array handling
+
+- `.toml`: TOML files
+  - Configuration file parsing
+  - Hierarchical structure support
+  - Metadata preservation
+
 ### Advanced Retrieval & Context
 
 The knowledge agent includes advanced retrieval capabilities that enhance search results through:
@@ -127,16 +180,63 @@ curl -sSL https://install.python-poetry.org | python3 -
 
 # Install project dependencies
 poetry install
+
+# If you get ModuleNotFoundError, install dependencies directly:
+pip install gitpython langchain-community langchain-core langchain-text-splitters langchain-huggingface langchain-chroma anthropic chromadb click python-dotenv sentence-transformers rich mkdocs mkdocs-material mkdocstrings diagrams graphviz
 ```
 
-4. Copy the example environment file and configure your settings:
+4. Install system dependencies (if needed):
+```bash
+# On macOS
+brew install graphviz
+
+# On Ubuntu/Debian
+sudo apt-get install graphviz
+
+# On Windows (using chocolatey)
+choco install graphviz
+```
+
+5. Copy the example environment file and configure your settings:
 ```bash
 cp .env.example .env
 # Edit .env with your settings:
-# - ANTHROPIC_API_KEY: Your Claude API key
+# - ANTHROPIC_API_KEY: Your Claude API key (required)
 # - VECTOR_STORE_PATH: Path to store the vector database (default: ./.vectorstore)
 # - DEFAULT_ROLE: Default role for responses (default: engineer)
 # - LOG_LEVEL: Logging verbosity (default: INFO)
+```
+
+### Troubleshooting Installation
+
+If you encounter any issues:
+
+1. **ModuleNotFoundError: No module named 'git'**:
+```bash
+pip install gitpython
+```
+
+2. **GraphViz errors when generating diagrams**:
+Make sure GraphViz is installed on your system (see step 4 above)
+
+3. **Sentence Transformers issues**:
+```bash
+pip install --force-reinstall sentence-transformers
+```
+
+4. **ChromaDB errors**:
+```bash
+pip install --upgrade chromadb
+```
+
+5. **Poetry dependency resolution issues**:
+```bash
+# Clear Poetry cache
+poetry cache clear . --all
+# Remove existing virtual environment
+rm -rf .venv
+# Reinstall dependencies
+poetry install
 ```
 
 ## Usage

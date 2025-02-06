@@ -1,16 +1,19 @@
 """Module for advanced retrieval and context management."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from pathlib import Path
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 
 from langchain_core.documents import Document
-from knowledge_agent.core.vector_store import VectorStore
 from knowledge_agent.core.logging import logger
 from knowledge_agent.core.conversation import ConversationMemory
+
+# Use TYPE_CHECKING to avoid circular imports
+if TYPE_CHECKING:
+    from knowledge_agent.core.vector_store import VectorStore
 
 @dataclass
 class SearchResult:
@@ -26,7 +29,7 @@ class AdvancedRetrieval:
     
     def __init__(
         self,
-        vector_store: VectorStore,
+        vector_store: "VectorStore",
         memory: Optional[ConversationMemory] = None,
         num_clusters: int = 3
     ):

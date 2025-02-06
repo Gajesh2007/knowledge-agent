@@ -1,6 +1,6 @@
 """LLM functionality for handling interactions with Claude."""
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 from anthropic import Anthropic
 from langchain_core.documents import Document
@@ -111,7 +111,8 @@ class LLMHandler:
             if 'commit_hash' in doc.metadata:
                 meta_context.append(f"Version: {doc.metadata['commit_hash'][:8]}")
                 if 'commit_message' in doc.metadata:
-                    meta_context.append(f"Change: {doc.metadata['commit_message'].split('\n')[0]}")
+                    message = doc.metadata['commit_message'].split('\n')[0]
+                    meta_context.append(f"Change: {message}")
             
             context_parts.append(
                 f"\n{'=' * 40}\n"

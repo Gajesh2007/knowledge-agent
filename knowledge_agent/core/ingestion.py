@@ -1,186 +1,166 @@
-"""Code and documentation ingestion functionality."""
-import os
+"""Module for ingesting code and documentation files into the vector store."""
+
+import logging
 from pathlib import Path
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Set, Union
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import TextLoader
-from langchain_core.documents import Document
+from knowledge_agent.core.code_parser import CodeEntity, ParserFactory as CodeParserFactory
+from knowledge_agent.core.doc_parser import DocSection, ParserFactory as DocParserFactory
+from knowledge_agent.core.vector_store import VectorStore
 
-from knowledge_agent.core.logging import logger
-from knowledge_agent.core.code_parser import parse_codebase, CodeEntity
-from knowledge_agent.core.version_control import VersionManager, VersionMetadata
+logger = logging.getLogger(__name__)
 
 SUPPORTED_CODE_EXTENSIONS = {
-    ".py": "Python",
-    ".go": "Go",
-    ".rs": "Rust",
-    ".sol": "Solidity",
+    '.py': 'Python',
+    '.js': 'JavaScript',
+    '.jsx': 'JavaScript (React)',
+    '.ts': 'TypeScript',
+    '.tsx': 'TypeScript (React)',
+    '.cpp': 'C++',
+    '.c': 'C',
+    '.html': 'HTML',
+    '.css': 'CSS',
+    '.go': 'Go',
+    '.rs': 'Rust',
+    '.sol': 'Solidity',
 }
 
 SUPPORTED_DOC_EXTENSIONS = {
-    ".md": "Markdown",
-    ".txt": "Text",
-    ".rst": "reStructuredText",
+    '.md': 'Markdown',
+    '.txt': 'Text',
+    '.rst': 'reStructuredText',
+    '.pdf': 'PDF',
+    '.tex': 'LaTeX',
+    '.yaml': 'YAML',
+    '.yml': 'YAML',
+    '.json': 'JSON',
+    '.toml': 'TOML',
 }
 
-def is_supported_file(file_path: str) -> bool:
+def is_supported_file(file_path: Path) -> bool:
     """Check if a file is supported for ingestion."""
-    ext = os.path.splitext(file_path)[1].lower()
-    return ext in SUPPORTED_CODE_EXTENSIONS or ext in SUPPORTED_DOC_EXTENSIONS
+    return (file_path.suffix.lower() in SUPPORTED_CODE_EXTENSIONS or
+            file_path.suffix.lower() in SUPPORTED_DOC_EXTENSIONS)
 
-def get_file_language(file_path: str) -> Optional[str]:
-    """Get the programming language or document type of a file."""
-    ext = os.path.splitext(file_path)[1].lower()
+def get_file_language(file_path: Path) -> Optional[str]:
+    """Get the language or document type of a file."""
+    ext = file_path.suffix.lower()
     return SUPPORTED_CODE_EXTENSIONS.get(ext) or SUPPORTED_DOC_EXTENSIONS.get(ext)
 
-def find_files(directory: str, extensions: set[str]) -> List[Path]:
-    """Recursively find all files with given extensions in a directory."""
-    logger.debug(f"Scanning directory: {directory} for extensions: {extensions}")
-    files = []
-    for ext in extensions:
-        found = list(Path(directory).rglob(f"*{ext}"))
-        logger.debug(f"Found {len(found)} files with extension {ext}")
-        files.extend(found)
-    return files
-
-def code_entity_to_document(
-    entity: CodeEntity,
-    version_meta: Optional[VersionMetadata] = None
-) -> Document:
-    """Convert a CodeEntity to a LangChain Document."""
-    # Combine code and docstring for better context
-    content = f"{entity.docstring}\n\n{entity.code}" if entity.docstring else entity.code
+def ingest_file(file_path: Path, vector_store: VectorStore) -> int:
+    """Ingest a single file into the vector store."""
+    if not is_supported_file(file_path):
+        logger.warning(f"Unsupported file type: {file_path}")
+        return 0
     
-    # Create metadata
-    metadata = {
-        **entity.metadata,
-        'type': entity.type,
-        'name': entity.name,
-        'parent': entity.parent or '',
-        'dependencies': list(entity.dependencies),
-        'start_line': entity.start_line,
-        'end_line': entity.end_line,
-    }
-    
-    # Add version metadata if available
-    if version_meta:
-        metadata.update({
-            'commit_hash': version_meta.commit_hash,
-            'branch': version_meta.branch,
-            'commit_date': version_meta.commit_date.isoformat(),
-            'author': version_meta.author,
-            'commit_message': version_meta.message,
-        })
-    
-    return Document(page_content=content, metadata=metadata)
-
-def ingest_code_file(
-    file_path: Path,
-    version_meta: Optional[VersionMetadata] = None
-) -> List[Document]:
-    """Ingest a code file using AST parsing."""
     try:
-        logger.debug(f"Parsing code file: {file_path}")
-        entities = parse_codebase(file_path)
-        documents = [code_entity_to_document(entity, version_meta) for entity in entities]
-        logger.debug(f"Created {len(documents)} documents from {file_path}")
-        return documents
+        # Try code parser first
+        parser = CodeParserFactory.get_parser(file_path)
+        if parser:
+            entities = parser.parse_file(file_path)
+            return _ingest_code_entities(entities, vector_store)
+        
+        # Try doc parser if code parser not found
+        parser = DocParserFactory.get_parser(file_path)
+        if parser:
+            sections = parser.parse_file(file_path)
+            return _ingest_doc_sections(sections, vector_store)
+        
+        logger.warning(f"No parser found for file: {file_path}")
+        return 0
     except Exception as e:
-        logger.error(f"Error processing code file {file_path}", exc_info=e)
-        return []
+        logger.error(f"Failed to ingest file {file_path}: {str(e)}")
+        return 0
 
-def ingest_doc_file(
-    file_path: Path,
-    chunk_size: int = 1000,
-    chunk_overlap: int = 200,
-    version_meta: Optional[VersionMetadata] = None
-) -> List[Document]:
-    """Ingest a documentation file using text chunking."""
-    try:
-        logger.debug(f"Loading documentation file: {file_path}")
-        loader = TextLoader(str(file_path))
-        documents = loader.load()
-        
-        logger.debug(f"Splitting content with chunk_size={chunk_size}, chunk_overlap={chunk_overlap}")
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", " ", ""],
-        )
-        
-        chunks = splitter.split_documents(documents)
-        
-        # Add metadata
-        language = get_file_language(str(file_path))
-        for chunk in chunks:
-            metadata = {
-                "file_path": str(file_path),
-                "language": language,
-                "type": "documentation",
+def _ingest_code_entities(entities: List[CodeEntity], vector_store: VectorStore) -> int:
+    """Ingest code entities into the vector store."""
+    chunks_created = 0
+    for entity in entities:
+        try:
+            # Create a chunk with code entity information
+            chunk = {
+                'content': entity.code,
+                'metadata': {
+                    'type': 'code',
+                    'entity_type': entity.type,
+                    'name': entity.name,
+                    'language': entity.metadata.get('language', 'unknown'),
+                    'file_path': entity.metadata.get('path', ''),
+                    'start_line': entity.start_line,
+                    'end_line': entity.end_line,
+                    'parent': entity.parent or '',
+                    'dependencies': list(entity.dependencies),
+                }
             }
             
-            # Add version metadata if available
-            if version_meta:
-                metadata.update({
-                    'commit_hash': version_meta.commit_hash,
-                    'branch': version_meta.branch,
-                    'commit_date': version_meta.commit_date.isoformat(),
-                    'author': version_meta.author,
-                    'commit_message': version_meta.message,
-                })
+            # Add docstring as a separate chunk if it exists
+            if entity.docstring:
+                doc_chunk = {
+                    'content': entity.docstring,
+                    'metadata': {
+                        'type': 'docstring',
+                        'entity_name': entity.name,
+                        'entity_type': entity.type,
+                        'language': entity.metadata.get('language', 'unknown'),
+                        'file_path': entity.metadata.get('path', ''),
+                        'start_line': entity.start_line,
+                    }
+                }
+                vector_store.add_chunk(doc_chunk)
+                chunks_created += 1
             
-            chunk.metadata.update(metadata)
-        
-        logger.debug(f"Created {len(chunks)} chunks from {file_path}")
-        return chunks
-    except Exception as e:
-        logger.error(f"Error processing documentation file {file_path}", exc_info=e)
-        return []
-
-def ingest_directory(
-    directory: Path,
-    is_code: bool = True,
-    ref: Optional[str] = None
-) -> List[Document]:
-    """Ingest all supported files in a directory.
-    
-    Args:
-        directory: Directory to ingest
-        is_code: Whether to ingest code files (True) or documentation files (False)
-        ref: Optional Git reference (commit, branch, tag) to use for versioning
-        
-    Returns:
-        List of document chunks
-    """
-    extensions = set(SUPPORTED_CODE_EXTENSIONS.keys()) if is_code else set(SUPPORTED_DOC_EXTENSIONS.keys())
-    logger.info(f"Starting {'code' if is_code else 'documentation'} ingestion from {directory}")
-    
-    # Initialize version manager if ref is provided
-    version_meta = None
-    if ref:
-        try:
-            version_manager = VersionManager(directory)
-            version_meta = version_manager.get_version_metadata(ref)
-            logger.info(f"Using version: {version_meta.commit_hash} ({version_meta.branch})")
+            # Add the code chunk
+            vector_store.add_chunk(chunk)
+            chunks_created += 1
         except Exception as e:
-            logger.error(f"Failed to initialize version manager: {str(e)}")
-            return []
+            logger.error(f"Failed to ingest code entity {entity.name}: {str(e)}")
     
-    files = find_files(directory, extensions)
-    if not files:
-        logger.warning(f"No {'code' if is_code else 'documentation'} files found in {directory}")
-        return []
+    return chunks_created
+
+def _ingest_doc_sections(sections: List[DocSection], vector_store: VectorStore) -> int:
+    """Ingest documentation sections into the vector store."""
+    chunks_created = 0
+    for section in sections:
+        try:
+            # Create a chunk with documentation section information
+            chunk = {
+                'content': section.content,
+                'metadata': {
+                    'type': 'documentation',
+                    'title': section.title,
+                    'file_path': str(section.source_file),
+                    'line_number': section.line_number,
+                    **(section.metadata or {})
+                }
+            }
+            
+            # Add the documentation chunk
+            vector_store.add_chunk(chunk)
+            chunks_created += 1
+        except Exception as e:
+            logger.error(f"Failed to ingest doc section {section.title}: {str(e)}")
     
-    all_chunks = []
-    with logger.progress(f"Processing {len(files)} files...") as progress:
-        for file_path in files:
-            logger.info(f"Processing {file_path}")
-            if is_code:
-                chunks = ingest_code_file(file_path, version_meta)
-            else:
-                chunks = ingest_doc_file(file_path, version_meta=version_meta)
-            all_chunks.extend(chunks)
+    return chunks_created
+
+def ingest_directory(directory: Path, vector_store: VectorStore,
+                    exclude_patterns: Optional[Set[str]] = None) -> int:
+    """Recursively ingest all supported files in a directory."""
+    if exclude_patterns is None:
+        exclude_patterns = set()
     
-    logger.success(f"Processed {len(files)} files, created {len(all_chunks)} chunks")
-    return all_chunks 
+    total_chunks = 0
+    try:
+        for file_path in directory.rglob('*'):
+            # Skip directories and excluded patterns
+            if not file_path.is_file() or any(pattern in str(file_path) for pattern in exclude_patterns):
+                continue
+            
+            # Ingest supported files
+            if is_supported_file(file_path):
+                chunks = ingest_file(file_path, vector_store)
+                total_chunks += chunks
+                logger.info(f"Ingested {file_path}: {chunks} chunks created")
+    except Exception as e:
+        logger.error(f"Failed to ingest directory {directory}: {str(e)}")
+    
+    return total_chunks 

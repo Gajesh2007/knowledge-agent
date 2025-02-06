@@ -39,6 +39,20 @@ env/
 .logs/
 docs/_build/
 
+# Documentation tools
+*.rst.txt
+*.md.txt
+_build/
+_static/
+_templates/
+.doctrees/
+.buildinfo
+*.pdf.txt
+*.tex.aux
+*.tex.log
+*.tex.out
+*.tex.toc
+
 # OS
 .DS_Store
 Thumbs.db

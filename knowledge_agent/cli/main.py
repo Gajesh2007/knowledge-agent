@@ -18,9 +18,9 @@ from rich.syntax import Syntax
 from rich.prompt import Prompt
 from rich.table import Table
 from knowledge_agent import __version__
-from knowledge_agent.core.ingestion import ingest_directory
-from knowledge_agent.core.llm import LLMHandler
+from knowledge_agent.core.ingestion import ingest_directory, SUPPORTED_CODE_EXTENSIONS, SUPPORTED_DOC_EXTENSIONS
 from knowledge_agent.core.vector_store import VectorStore
+from knowledge_agent.core.llm import LLMHandler
 from knowledge_agent.core.logging import logger
 from knowledge_agent.core.role_prompts import get_role_prompt, DEFAULT_ROLE
 from knowledge_agent.core.repo_manager import RepoManager
@@ -28,7 +28,8 @@ from knowledge_agent.core.code_analysis import CodeAnalyzer
 from knowledge_agent.core.conversation import ConversationMemory
 from knowledge_agent.core.version_control import VersionManager
 from knowledge_agent.core.role_manager import RoleManager
-from knowledge_agent.core.search import SearchResult
+from knowledge_agent.core.retrieval import SearchResult
+import git
 
 # Load environment variables
 load_dotenv()
@@ -273,132 +274,113 @@ def cli():
     pass
 
 @cli.command()
-@click.option(
-    "--path",
-    "-p",
-    type=click.Path(exists=True),
-    help="Path to the code directory to ingest",
-)
-@click.option(
-    "--docs",
-    "-d",
-    type=click.Path(exists=True),
-    help="Path to the documentation directory to ingest",
-)
-def ingest(path: Optional[str], docs: Optional[str]):
-    """Ingest code and documentation into the knowledge base."""
-    if not path and not docs:
-        logger.error("No input paths provided")
-        return
-    
-    if not vector_store:
-        logger.error("Vector store not initialized")
-        return
-
-    with logger.section("Ingestion", "Starting ingestion process..."):
-        # Process code files
-        if path:
-            logger.info("Processing code files")
-            code_chunks = ingest_directory(Path(path), is_code=True)
-            vector_store.add_documents(code_chunks)
-
-        # Process documentation files
-        if docs:
-            logger.info("Processing documentation files")
-            doc_chunks = ingest_directory(Path(docs), is_code=False)
-            vector_store.add_documents(doc_chunks)
-
-        # Show stats
-        stats = vector_store.get_collection_stats()
-        logger.success(
-            f"Ingestion complete\n"
-            f"Total chunks in vector store: {stats['total_chunks']}\n"
-            f"Vector store location: {stats['persist_directory']}"
-        )
+@click.option('--repo', help='GitHub repository URL to fetch')
+@click.option('--branch', default='main', help='Branch to fetch')
+@click.option('--ingest', is_flag=True, help='Ingest the repository after fetching')
+@click.option('--exclude', multiple=True, help='Patterns to exclude from ingestion')
+def fetch(repo: str, branch: str = 'main', ingest: bool = False, exclude: tuple = ()):
+    """Fetch a GitHub repository and optionally ingest it."""
+    try:
+        # Create .repos directory if it doesn't exist
+        repos_dir = Path('.repos')
+        repos_dir.mkdir(exist_ok=True)
+        
+        # Extract repo name from URL
+        repo_name = repo.split('/')[-1].replace('.git', '')
+        repo_path = repos_dir / repo_name
+        
+        # Clone or update repository
+        if repo_path.exists():
+            logger.info(f"Updating repository {repo_name}")
+            git_repo = git.Repo(repo_path)
+            git_repo.remotes.origin.fetch()
+            git_repo.git.checkout(branch)
+            git_repo.remotes.origin.pull()
+        else:
+            logger.info(f"Cloning repository {repo_name}")
+            git.Repo.clone_from(repo, repo_path, branch=branch)
+        
+        if ingest:
+            # Initialize vector store
+            vector_store = VectorStore()
+            
+            # Ingest code files
+            logger.info("Ingesting code files...")
+            code_chunks = ingest_directory(
+                repo_path,
+                vector_store,
+                exclude_patterns=set(exclude)
+            )
+            logger.info(f"Created {code_chunks} code chunks")
+            
+            # Ingest documentation files
+            logger.info("Ingesting documentation files...")
+            doc_chunks = ingest_directory(
+                repo_path / 'docs' if (repo_path / 'docs').exists() else repo_path,
+                vector_store,
+                exclude_patterns=set(exclude)
+            )
+            logger.info(f"Created {doc_chunks} documentation chunks")
+            
+            logger.info(f"Total chunks created: {code_chunks + doc_chunks}")
+    except Exception as e:
+        logger.error(f"Failed to fetch repository: {str(e)}")
+        raise click.ClickException(str(e))
 
 @cli.command()
-@click.argument('query', type=str)
-@click.option('--k', default=5, help='Number of results to return')
-@click.option('--metadata-filter', '-f', multiple=True, help='Filter results by metadata (format: key=value)')
-@click.option('--basic', is_flag=True, help='Use basic search without advanced features')
-@click.option('--show-clusters', is_flag=True, help='Show semantic cluster summaries')
-@click.option('--min-relevance', type=float, default=0.0, help='Minimum relevance score (0-1)')
-@click.option('--role', help='Role to use for response generation')
-def search(query: str, k: int, metadata_filter: tuple, basic: bool, show_clusters: bool, min_relevance: float, role: str):
-    """Search the knowledge base with advanced retrieval features."""
-    if not vector_store:
-        console.print("[red]Error: Vector store not initialized. Run 'knowledge-agent init' first.[/red]")
-        return
-
-    if not llm_handler:
-        console.print("[red]Error: LLM handler not initialized. Run 'knowledge-agent init' first.[/red]")
-        return
-
-    # Parse metadata filters
-    metadata_dict = {}
-    for filter_str in metadata_filter:
-        try:
-            key, value = filter_str.split('=')
-            metadata_dict[key.strip()] = value.strip()
-        except ValueError:
-            console.print(f"[yellow]Warning: Invalid metadata filter format: {filter_str}. Skipping.[/yellow]")
-
+@click.argument('path', type=click.Path(exists=True))
+@click.option('--exclude', multiple=True, help='Patterns to exclude from ingestion')
+def ingest(path: str, exclude: tuple = ()):
+    """Ingest files from a directory."""
     try:
-        # Perform search
-        results = vector_store.similarity_search(
-            query,
-            k=k,
-            metadata_filter=metadata_dict if metadata_dict else None,
-            use_advanced=not basic,
-            min_relevance=min_relevance
-        )
-
-        if not results:
-            console.print("[yellow]No results found.[/yellow]")
-            return
-
-        # Display results
-        console.print(f"\n[bold]Search Results for:[/bold] {query}\n")
+        vector_store = VectorStore()
+        directory = Path(path)
         
-        if show_clusters and not basic and hasattr(results[0], 'semantic_cluster'):
-            clusters = {}
-            for result in results:
-                if result.semantic_cluster not in clusters:
-                    clusters[result.semantic_cluster] = []
-                clusters[result.semantic_cluster].append(result)
-            
-            for cluster_id, cluster_results in clusters.items():
-                console.print(f"\n[bold blue]Cluster {cluster_id + 1}[/bold blue]")
-                for result in cluster_results:
-                    display_search_result(result)
-        else:
-            for result in results:
-                display_search_result(result)
-
-        # Generate response using role if specified
-        if role:
-            context = "\n".join([str(r.document.page_content) for r in results[:3]])
-            response = llm_handler.generate_response(query, context, role=role)
-            console.print(f"\n[bold green]Response ({role}):[/bold green]\n{response}")
-
+        # List supported file types
+        logger.info("Supported code file types:")
+        for ext, lang in SUPPORTED_CODE_EXTENSIONS.items():
+            logger.info(f"  {ext}: {lang}")
+        logger.info("\nSupported documentation file types:")
+        for ext, doc_type in SUPPORTED_DOC_EXTENSIONS.items():
+            logger.info(f"  {ext}: {doc_type}")
+        
+        # Ingest files
+        chunks = ingest_directory(directory, vector_store, exclude_patterns=set(exclude))
+        logger.info(f"Created {chunks} chunks")
     except Exception as e:
-        console.print(f"[red]Error during search: {str(e)}[/red]")
+        logger.error(f"Failed to ingest directory: {str(e)}")
+        raise click.ClickException(str(e))
 
-def display_search_result(result):
-    """Display a single search result with enhanced information."""
-    metadata = result.document.metadata
-    source = metadata.get('source', 'Unknown')
-    doc_type = metadata.get('type', 'Unknown')
-    
-    panel = Panel(
-        f"[bold]{source}[/bold] ({doc_type})\n\n"
-        f"{result.document.page_content}\n\n"
-        f"[dim]Relevance: {result.relevance_score:.2f}"
-        + (f" | Context Score: {result.context_score:.2f}" if hasattr(result, 'context_score') else "")
-        + "[/dim]",
-        border_style="blue"
-    )
-    console.print(panel)
+@cli.command()
+@click.argument('query')
+@click.option('--limit', default=5, help='Maximum number of results to return')
+def search(query: str, limit: int = 5):
+    """Search the vector store."""
+    try:
+        vector_store = VectorStore()
+        results = vector_store.search(query, limit=limit)
+        
+        if not results:
+            logger.info("No results found")
+            return
+        
+        for i, result in enumerate(results, 1):
+            logger.info(f"\nResult {i}:")
+            logger.info(f"Score: {result.score:.3f}")
+            logger.info(f"File: {result.metadata.get('file_path', 'Unknown')}")
+            if result.metadata.get('type') == 'code':
+                logger.info(f"Language: {result.metadata.get('language', 'Unknown')}")
+                logger.info(f"Entity: {result.metadata.get('name', 'Unknown')} ({result.metadata.get('entity_type', 'Unknown')})")
+                logger.info(f"Lines: {result.metadata.get('start_line', '?')}-{result.metadata.get('end_line', '?')}")
+            elif result.metadata.get('type') == 'documentation':
+                logger.info(f"Title: {result.metadata.get('title', 'Unknown')}")
+                if result.metadata.get('line_number'):
+                    logger.info(f"Line: {result.metadata['line_number']}")
+            logger.info("\nContent:")
+            logger.info(result.content)
+    except Exception as e:
+        logger.error(f"Failed to search: {str(e)}")
+        raise click.ClickException(str(e))
 
 @cli.command()
 @click.option(
@@ -423,71 +405,6 @@ def session(role: str, resume: Optional[str]):
         return
     
     InteractiveSession(role=role, session_id=resume).cmdloop()
-
-@cli.command()
-@click.option(
-    "--repo",
-    "-r",
-    multiple=True,
-    help="GitHub repository URL(s) to fetch. Can be specified multiple times.",
-    required=True
-)
-@click.option(
-    "--branch",
-    "-b",
-    help="Branch to checkout (optional)",
-)
-@click.option(
-    "--ingest",
-    "-i",
-    is_flag=True,
-    help="Automatically ingest fetched repositories",
-)
-@click.option(
-    "--clean",
-    "-c",
-    is_flag=True,
-    help="Clean existing repositories before fetching",
-)
-def fetch(repo: List[str], branch: Optional[str], ingest: bool, clean: bool):
-    """Fetch code from GitHub repositories for ingestion.
-    
-    Examples:
-        knowledge-agent fetch --repo https://github.com/user/repo1
-        knowledge-agent fetch -r repo1 -r repo2 -b main --ingest
-    """
-    repo_manager = RepoManager()
-    
-    if clean:
-        with logger.section("Cleanup", "Cleaning existing repositories..."):
-            repo_manager.cleanup()
-    
-    with logger.section("Fetch", f"Fetching {len(repo)} repositories..."):
-        try:
-            paths = repo_manager.fetch_multiple(repo, branch)
-            
-            if not paths:
-                logger.error("No repositories were successfully fetched")
-                return
-                
-            logger.info(f"Successfully fetched {len(paths)} repositories")
-            
-            if ingest:
-                for path in paths:
-                    logger.info(f"Ingesting repository: {path}")
-                    code_chunks = ingest_directory(path, is_code=True)
-                    vector_store.add_documents(code_chunks)
-                    
-                    # Also ingest docs directory if it exists
-                    docs_path = path / "docs"
-                    if docs_path.exists():
-                        logger.info(f"Ingesting documentation from: {docs_path}")
-                        doc_chunks = ingest_directory(docs_path, is_code=False)
-                        vector_store.add_documents(doc_chunks)
-                        
-        except Exception as e:
-            logger.error(f"Failed to fetch repositories: {str(e)}")
-            return
 
 @cli.group()
 def analyze():
