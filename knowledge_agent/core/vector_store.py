@@ -26,14 +26,28 @@ class VectorStore:
         )
         
         # Create the persist directory if it doesn't exist
-        Path(persist_directory).mkdir(parents=True, exist_ok=True)
+        persist_path = Path(persist_directory).resolve()
+        persist_path.mkdir(parents=True, exist_ok=True)
         
-        # Initialize ChromaDB
+        # Initialize ChromaDB with proper settings
         logger.debug("Initializing ChromaDB")
         try:
+            # Create a PersistentClient with proper settings
+            client = PersistentClient(
+                path=str(persist_path),
+                settings=Settings(
+                    allow_reset=True,
+                    anonymized_telemetry=False,
+                    is_persistent=True
+                )
+            )
+            
+            # Initialize Chroma with the client
             self.db = Chroma(
-                persist_directory=persist_directory,
+                client=client,
                 embedding_function=self.embeddings,
+                collection_name="knowledge_base",
+                persist_directory=str(persist_path)
             )
             logger.success("Vector store initialized successfully")
         except Exception as e:
@@ -51,6 +65,7 @@ class VectorStore:
         
         try:
             self.db.add_documents([chunk])
+            # ChromaDB automatically persists changes
             logger.debug(f"Added chunk to vector store: {chunk.page_content[:100]}...")
         except Exception as e:
             logger.error("Error adding chunk to vector store", exc_info=e)
@@ -65,6 +80,7 @@ class VectorStore:
         try:
             logger.info(f"Adding {len(documents)} documents to vector store")
             self.db.add_documents(documents)
+            # ChromaDB automatically persists changes
             logger.success(f"Added {len(documents)} chunks to the vector store")
         except Exception as e:
             logger.error("Error adding documents to vector store", exc_info=e)
