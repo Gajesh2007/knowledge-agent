@@ -1,11 +1,12 @@
 """LLM functionality for handling interactions with Claude."""
 import os
-from typing import List, Tuple, Optional
+from typing import List, Optional, Dict
 
 from anthropic import Anthropic
+from langchain_core.documents import Document
 
 from knowledge_agent.core.logging import logger
-from knowledge_agent.core.memory import ConversationMemory
+from knowledge_agent.core.role_manager import RoleManager
 
 DEFAULT_SYSTEM_PROMPT = """You are a knowledgeable assistant that helps users understand code and documentation.
 Your task is to provide accurate, helpful responses based on the context provided.
@@ -16,28 +17,22 @@ When answering follow-up questions, use the conversation history to maintain con
 class LLMHandler:
     """Handles interactions with the Claude LLM."""
 
-    def __init__(self, api_key: str = None, max_conversation_history: int = 10):
-        """Initialize the LLM handler.
+    def __init__(self):
+        """Initialize the LLM handler."""
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable not set")
         
-        Args:
-            api_key: Optional API key for Claude. If not provided, will look for ANTHROPIC_API_KEY in environment.
-            max_conversation_history: Maximum number of messages to keep in conversation history
-        """
-        logger.debug("Initializing LLM handler")
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            logger.error("ANTHROPIC_API_KEY not found in environment")
-            raise ValueError("ANTHROPIC_API_KEY must be provided or set in environment")
+        self.client = Anthropic(api_key=api_key)
+        self.model = os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229")
+        self.role_manager = RoleManager()
         
-        # Initialize the client and conversation memory
-        try:
-            logger.debug("Initializing Anthropic client")
-            self.client = Anthropic(api_key=self.api_key)
-            self.memory = ConversationMemory(max_messages=max_conversation_history)
-            logger.success("LLM handler initialized successfully")
-        except Exception as e:
-            logger.error("Failed to initialize Anthropic client", exc_info=e)
-            raise
+        # Base system prompt
+        self.base_prompt = (
+            "You are a knowledgeable assistant helping users understand code and documentation. "
+            "You have access to relevant code snippets and documentation that will be provided. "
+            "Please provide clear, accurate, and helpful responses."
+        )
     
     def format_context(self, documents: List[Tuple[dict, float]]) -> str:
         """Format document chunks and their relevance scores into a string.
@@ -60,65 +55,97 @@ class LLMHandler:
         return "\n---\n".join(context_parts)
     
     def generate_response(
-        self, 
-        query: str, 
-        documents: List[Tuple[dict, float]], 
-        role_prompt: Optional[str] = None
+        self,
+        query: str,
+        documents: List[Document],
+        role_name: Optional[str] = None,
+        context_type: Optional[str] = None,
+        conversation_context: Optional[str] = None,
+        max_tokens: int = 1000
     ) -> str:
-        """Generate a response using Claude.
+        """Generate a response using the LLM.
         
         Args:
-            query: The user's query
-            documents: List of tuples containing (document, relevance_score)
-            role_prompt: Optional role-specific prompt instructions
-        
+            query: User's question
+            documents: Relevant documents from the vector store
+            role_name: Optional role name for response style
+            context_type: Optional context type for style guidelines
+            conversation_context: Optional conversation history
+            max_tokens: Maximum tokens in the response
+            
         Returns:
-            Claude's response
+            Generated response text
         """
-        try:
-            logger.info(f"Generating response for query: {query}")
-            context = self.format_context(documents)
-            
-            # Add user message to memory
-            self.memory.add_user_message(query)
-            
-            # Get conversation history
-            conversation_context = self.memory.get_recent_context()
-            
-            # Combine prompts and context
-            system_prompt = DEFAULT_SYSTEM_PROMPT
+        # Build the system prompt
+        system_prompt = self.base_prompt
+        
+        # Add role-specific prompt if provided
+        if role_name:
+            role_prompt = self.role_manager.get_prompt(role_name, context_type)
             if role_prompt:
                 system_prompt = f"{system_prompt}\n\n{role_prompt}"
+        
+        # Build the context
+        context_parts = []
+        
+        # Add conversation context if available
+        if conversation_context:
+            context_parts.append("Previous conversation:")
+            context_parts.append(conversation_context)
+        
+        # Add relevant documents
+        context_parts.append("\nRelevant code and documentation:")
+        for doc in documents:
+            # Add metadata context
+            meta_context = []
+            if 'language' in doc.metadata:
+                meta_context.append(f"Language: {doc.metadata['language']}")
+            if 'type' in doc.metadata:
+                meta_context.append(f"Type: {doc.metadata['type']}")
+            if 'name' in doc.metadata:
+                meta_context.append(f"Name: {doc.metadata['name']}")
+            if 'file_path' in doc.metadata:
+                meta_context.append(f"File: {doc.metadata['file_path']}")
             
-            # Build the user message with context
-            user_message = f"Based on the following code and documentation, please answer this question: {query}\n\n"
-            if conversation_context:
-                user_message += f"Previous conversation:\n{conversation_context}\n\n"
-            user_message += f"Context:\n{context}"
+            # Add version info if available
+            if 'commit_hash' in doc.metadata:
+                meta_context.append(f"Version: {doc.metadata['commit_hash'][:8]}")
+                if 'commit_message' in doc.metadata:
+                    meta_context.append(f"Change: {doc.metadata['commit_message'].split('\n')[0]}")
             
-            logger.debug("Sending request to Claude")
-            message = self.client.messages.create(
-                model="claude-3-sonnet-20240229",
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_message
-                    }
-                ]
+            context_parts.append(
+                f"\n{'=' * 40}\n"
+                f"{', '.join(meta_context)}\n\n"
+                f"{doc.page_content}"
             )
+        
+        # Combine everything
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Context:\n{chr(10).join(context_parts)}\n\n"
+                    f"Question: {query}"
+                )
+            }
+        ]
+        
+        try:
+            logger.debug("Sending request to Claude")
+            response = self.client.messages.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=max_tokens
+            )
+            return response.content[0].text
             
-            response = message.content[0].text
-            
-            # Add assistant response to memory
-            self.memory.add_assistant_message(response, context=[doc for doc, _ in documents])
-            
-            logger.debug("Response received from Claude")
-            return response
         except Exception as e:
-            logger.error("Error generating response", exc_info=e)
-            return "Sorry, I encountered an error while generating a response."
+            logger.error("Failed to generate response", exc_info=e)
+            return f"Error generating response: {str(e)}"
     
     def clear_memory(self) -> None:
         """Clear the conversation memory."""

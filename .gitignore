@@ -22,18 +22,23 @@ wheels/
 
 # Virtual Environment
 venv/
-env/
 ENV/
-.env
+env/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.DS_Store
 
 # Project specific
 .vectorstore/
-*.log
-conversation_history.json 
+.conversations/
+.roles/
+.env
+.logs/
+docs/_build/
+
+# OS
+.DS_Store
+Thumbs.db

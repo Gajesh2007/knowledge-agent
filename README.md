@@ -19,6 +19,93 @@ A powerful command-line tool that helps you understand your codebase through nat
   - Maintains context between queries
   - Provides relevant code snippets and explanations
 
+### Advanced Retrieval & Context
+
+The knowledge agent now includes advanced retrieval capabilities that enhance search results through:
+
+- **Semantic Clustering**: Results are automatically grouped into semantic clusters for better organization
+- **Context-Aware Scoring**: Search results are scored based on conversation context and relevance
+- **Metadata Filtering**: Filter results by specific metadata attributes
+- **Minimum Relevance Thresholds**: Set minimum relevance scores to ensure quality results
+
+#### Advanced Search Commands
+
+```bash
+# Basic search with default settings
+knowledge-agent search "How does the vector store work?"
+
+# Search with metadata filtering
+knowledge-agent search "security features" -f type=code -f language=python
+
+# Show semantic clusters in results
+knowledge-agent search "database operations" --show-clusters
+
+# Set minimum relevance threshold
+knowledge-agent search "error handling" --min-relevance 0.7
+
+# Specify number of results
+knowledge-agent search "API endpoints" --k 10
+
+# Use basic search without advanced features
+knowledge-agent search "quick lookup" --basic
+
+# Combine with role-based responses
+knowledge-agent search "architecture overview" --role architect --show-clusters
+```
+
+Each search result includes:
+- Source file and type
+- Content snippet
+- Relevance score
+- Context score (when applicable)
+- Semantic cluster information (when enabled)
+
+### Documentation Generation
+
+The knowledge agent now includes powerful documentation generation capabilities:
+
+- **Automated Documentation**: Generate comprehensive documentation from your codebase
+  - Multiple templates (module, API)
+  - Architecture diagrams
+  - MkDocs integration with Material theme
+  - Code entity documentation
+
+- **Documentation Commands**:
+```bash
+# Generate full documentation
+knowledge-agent docs generate ./src
+
+# Use specific template
+knowledge-agent docs generate ./src -t api
+
+# Custom output directory
+knowledge-agent docs generate ./src -o ./custom-docs
+
+# Generate without architecture diagram
+knowledge-agent docs generate ./src --no-diagram
+
+# Document specific entity
+knowledge-agent docs entity ./src -n MyClass
+
+# Generate architecture diagram only
+knowledge-agent docs diagram ./src -o architecture.png
+```
+
+- **Documentation Features**:
+  - Semantic analysis of code structure
+  - Dependency tracking and visualization
+  - Integration with version control
+  - Customizable templates
+  - Beautiful, searchable documentation site
+
+- **Generated Documentation Includes**:
+  - Overview and architecture
+  - Installation and usage guides
+  - API documentation
+  - Code examples
+  - Architecture diagrams
+  - Dependency information
+
 ## Installation
 
 1. Clone the repository:

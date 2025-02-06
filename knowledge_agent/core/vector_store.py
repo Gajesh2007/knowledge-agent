@@ -1,13 +1,15 @@
 """Vector store functionality for storing and retrieving document chunks."""
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 
 from chromadb import PersistentClient, Settings
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 
 from knowledge_agent.core.logging import logger
+from knowledge_agent.core.retrieval import AdvancedRetrieval, SearchResult
 
 class VectorStore:
     """Vector store for document chunks using ChromaDB."""
@@ -37,8 +39,11 @@ class VectorStore:
         except Exception as e:
             logger.error("Failed to initialize vector store", exc_info=e)
             raise
+        
+        # Initialize advanced retrieval
+        self.advanced_retrieval = None
     
-    def add_documents(self, documents: List[dict]) -> None:
+    def add_documents(self, documents: List[Document]) -> None:
         """Add documents to the vector store."""
         if not documents:
             logger.warning("No documents provided to add to vector store")
@@ -52,13 +57,55 @@ class VectorStore:
             logger.error("Error adding documents to vector store", exc_info=e)
             raise
     
-    def similarity_search(self, query: str, k: int = 4) -> List[Tuple[dict, float]]:
-        """Search for similar documents in the vector store."""
+    def similarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        metadata_filter: Optional[Dict[str, str]] = None,
+        use_advanced: bool = True
+    ) -> Union[List[Tuple[Document, float]], List[SearchResult]]:
+        """Search for similar documents in the vector store.
+        
+        Args:
+            query: Search query
+            k: Number of results to return
+            metadata_filter: Optional metadata filters
+            use_advanced: Whether to use advanced retrieval features
+            
+        Returns:
+            List of (document, score) tuples or SearchResult objects
+        """
         try:
             logger.debug(f"Performing similarity search for query: {query} (k={k})")
-            results = self.db.similarity_search_with_score(query, k=k)
-            logger.debug(f"Found {len(results)} results")
-            return [(doc, score) for doc, score in results]
+            
+            if use_advanced:
+                # Use advanced retrieval if requested
+                if not self.advanced_retrieval:
+                    self.advanced_retrieval = AdvancedRetrieval(self)
+                
+                results = self.advanced_retrieval.search(
+                    query,
+                    k=k,
+                    metadata_filter=metadata_filter
+                )
+                
+                # Get cluster summary for logging
+                clusters = self.advanced_retrieval.get_cluster_summary(results)
+                logger.debug("Search results by cluster:")
+                for cluster_id, docs in clusters.items():
+                    logger.debug(f"Cluster {cluster_id}: {', '.join(docs)}")
+                
+                return results
+            else:
+                # Use basic similarity search
+                results = self.db.similarity_search_with_score(
+                    query,
+                    k=k,
+                    filter=metadata_filter
+                )
+                logger.debug(f"Found {len(results)} results")
+                return [(doc, score) for doc, score in results]
+                
         except Exception as e:
             logger.error("Error searching vector store", exc_info=e)
             return []
