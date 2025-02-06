@@ -1,65 +1,111 @@
 # CLI Knowledge Base Agent
 
-A command-line tool that ingests code in multiple languages (Go, Python, Rust, Solidity) and related documentation, indexes them using LangChain's built-in tools for chunking and vector storage, and allows users to ask questions and retrieve context-based answers via a CLI interface.
+A powerful command-line tool that helps you understand your codebase through natural language queries. Features role-based explanations tailored for different expertise levels (beginner, engineer, business development).
 
 ## Features
 
-- Code and documentation ingestion for multiple languages
-- Vector-based semantic search using LangChain
-- Natural language Q&A powered by Claude (Anthropic)
-- Local vector storage using ChromaDB
-- Command-line interface for easy interaction
+- 🎯 **Role-Based Responses**: Get explanations tailored to your expertise level
+  - Beginner: Step-by-step explanations with simple language
+  - Engineer: Technical details and implementation insights
+  - Business Development: High-level functionality and business impact
+
+- 💬 **Interactive Sessions**: Start a conversation with your codebase
+  - Multi-turn queries with conversation memory
+  - Switch roles on the fly
+  - Color-coded, formatted output
+
+- 🔍 **Smart Search**: Uses semantic search to find relevant code and documentation
+  - Supports both code and documentation ingestion
+  - Maintains context between queries
+  - Provides relevant code snippets and explanations
 
 ## Installation
 
-1. Make sure you have Python 3.9+ installed
-2. Install Poetry if you haven't already:
-   ```bash
-   curl -sSL https://install.python-poetry.org | python3 -
-   ```
-3. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/knowledge-agent.git
-   cd knowledge-agent
-   ```
-4. Install dependencies:
-   ```bash
-   poetry install
-   ```
-5. Copy the example environment file and configure your settings:
-   ```bash
-   cp .env.example .env
-   ```
-6. Edit `.env` and add your Anthropic API key
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/knowledge-agent.git
+cd knowledge-agent
+```
+
+2. Create and activate a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Copy the example environment file and configure your settings:
+```bash
+cp .env.example .env
+# Edit .env with your settings
+```
 
 ## Usage
 
-1. Ingest code and documentation:
-   ```bash
-   knowledge-agent ingest --path /path/to/code --docs /path/to/docs
-   ```
+1. **Ingest your codebase**:
+```bash
+knowledge-agent ingest --path ./your/code/path --docs ./your/docs/path
+```
 
-2. Query the knowledge base:
-   ```bash
-   knowledge-agent search "How does function X work?"
-   ```
+2. **Ask questions (one-off)**:
+```bash
+# Use default role (engineer)
+knowledge-agent search "How does the vector store work?"
+
+# Specify a role
+knowledge-agent search --role beginner "How does the vector store work?"
+knowledge-agent search -r bd "What's the business impact of the vector store?"
+```
+
+3. **Start an interactive session**:
+```bash
+# Start with default role
+knowledge-agent session
+
+# Start with specific role
+knowledge-agent session --role beginner
+```
+
+### Interactive Session Commands
+
+- Ask questions directly by typing them
+- `role <role>`: Switch to a different role (beginner/engineer/bd)
+- `clear`: Clear conversation history
+- `exit` or Ctrl+D: End the session
+
+## Configuration
+
+The following environment variables can be configured in `.env`:
+
+- `ANTHROPIC_API_KEY`: Your Claude API key
+- `VECTOR_STORE_PATH`: Path to store the vector database
+- `DEFAULT_ROLE`: Default role for responses (beginner/engineer/bd)
+- `LOG_LEVEL`: Logging verbosity (INFO/DEBUG/WARNING)
 
 ## Development
 
-- Run tests:
-  ```bash
-  poetry run pytest
-  ```
+1. Install development dependencies:
+```bash
+pip install -r requirements-dev.txt
+```
 
-- Format code:
-  ```bash
-  poetry run black .
-  ```
-
-## License
-
-MIT
+2. Run tests:
+```bash
+pytest
+```
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. 
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 

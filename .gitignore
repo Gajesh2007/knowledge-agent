@@ -21,19 +21,19 @@ wheels/
 *.egg
 
 # Virtual Environment
-.env
-.venv
-env/
 venv/
+env/
 ENV/
+.env
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+.DS_Store
 
 # Project specific
 .vectorstore/
-.logs/
-*.log 
+*.log
+conversation_history.json 
