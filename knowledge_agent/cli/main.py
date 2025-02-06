@@ -274,60 +274,67 @@ def cli():
     pass
 
 @cli.command()
-@click.option('--repo', help='GitHub repository URL to fetch')
-@click.option('--branch', default='master', help='Branch to fetch')
-@click.option('--ingest', is_flag=True, help='Ingest the repository after fetching')
+@click.option('--repo', multiple=True, help='GitHub repository URLs to fetch (can specify multiple)')
+@click.option('--from-file', type=click.Path(exists=True, dir_okay=False), help='Text file containing repository URLs (one per line)')
+@click.option('--branch', default='master', help='Branch to fetch (applies to all repos)')
+@click.option('--ingest', is_flag=True, help='Ingest the repositories after fetching')
 @click.option('--exclude', multiple=True, help='Patterns to exclude from ingestion')
-def fetch(repo: str, branch: str = 'master', ingest: bool = False, exclude: tuple = ()):
-    """Fetch a GitHub repository and optionally ingest it."""
-    try:
-        # Create .repos directory if it doesn't exist
-        repos_dir = Path('.repos')
-        repos_dir.mkdir(exist_ok=True)
-        
-        # Extract repo name from URL
-        repo_name = repo.split('/')[-1].replace('.git', '')
-        repo_path = repos_dir / repo_name
-        
-        # Clone or update repository
-        if repo_path.exists():
+def fetch(repo: tuple, from_file: str, branch: str = 'master', ingest: bool = False, exclude: tuple = ()):
+    """Fetch and optionally ingest GitHub repositories."""
+    repositories = list(repo)  # Convert tuple to list
+    
+    # Read additional repos from file if provided
+    if from_file:
+        try:
+            with open(from_file, 'r') as f:
+                # Read non-empty lines and strip whitespace
+                file_repos = [line.strip() for line in f if line.strip()]
+                repositories.extend(file_repos)
+        except Exception as e:
+            console.print(f"[error]Failed to read repositories from file: {str(e)}[/error]")
+            return
+
+    if not repositories:
+        console.print("[error]Please specify at least one repository URL (via --repo or --from-file)[/error]")
+        return
+
+    repo_manager = RepoManager()
+    
+    # Show summary of what will be processed
+    console.print(f"\n[info]Will process {len(repositories)} repositories:[/info]")
+    for repo_url in repositories:
+        console.print(f"  • {repo_url}")
+    console.print()
+    
+    for repository_url in repositories:
+        try:
+            # Extract repo name from URL
+            repo_name = repository_url.split('/')[-1].replace('.git', '')
             logger.info(f"Updating repository {repo_name}")
-            git_repo = git.Repo(repo_path)
-            git_repo.remotes.origin.fetch()
-            git_repo.git.checkout(branch)
-            git_repo.remotes.origin.pull()
-        else:
-            logger.info(f"Cloning repository {repo_name}")
-            git.Repo.clone_from(repo, repo_path, branch=branch)
-        
-        if ingest:
-            # Initialize vector store with persist directory
-            vector_store = VectorStore(
-                persist_directory=os.getenv("VECTOR_STORE_PATH", "./.vectorstore")
-            )
             
-            # Ingest code files
-            logger.info("Ingesting code files...")
-            code_chunks = ingest_directory(
-                repo_path,
-                vector_store,
-                exclude_patterns=set(exclude)
-            )
-            logger.info(f"Created {code_chunks} code chunks")
+            # Fetch/clone the repository
+            repo_path = repo_manager.get_repository(repository_url, branch)
             
-            # Ingest documentation files
-            logger.info("Ingesting documentation files...")
-            doc_chunks = ingest_directory(
-                repo_path / 'docs' if (repo_path / 'docs').exists() else repo_path,
-                vector_store,
-                exclude_patterns=set(exclude)
-            )
-            logger.info(f"Created {doc_chunks} documentation chunks")
+            if ingest:
+                logger.info("Ingesting code files...")
+                try:
+                    count = ingest_directory(repo_path, vector_store, exclude_patterns=exclude)
+                    console.print(f"[success]Successfully ingested {count} chunks from {repo_name}[/success]")
+                except Exception as e:
+                    console.print(f"[error]Failed to ingest repository {repo_name}: {str(e)}[/error]")
             
-            logger.info(f"Total chunks created: {code_chunks + doc_chunks}")
-    except Exception as e:
-        logger.error(f"Failed to fetch repository: {str(e)}")
-        raise click.ClickException(str(e))
+            console.print(f"[success]Successfully processed {repo_name}[/success]")
+            
+        except git.exc.GitCommandError as e:
+            console.print(f"[error]Git error for {repository_url}: {str(e)}[/error]")
+        except Exception as e:
+            console.print(f"[error]Error processing {repository_url}: {str(e)}[/error]")
+            continue
+
+    if ingest:
+        # Show final stats
+        stats = vector_store.get_collection_stats()
+        console.print(f"\n[info]Total chunks in vector store: {stats['total_chunks']}[/info]")
 
 @cli.command()
 @click.argument('path', type=click.Path(exists=True))
