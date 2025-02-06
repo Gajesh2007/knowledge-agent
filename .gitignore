@@ -58,3 +58,7 @@ _templates/
 Thumbs.db
 
 .repos/
+
+# Vector store
+.vector-store/
+vector-store/
